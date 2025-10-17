@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Python version management
+.python-version
+
+# Data files
+data/
+*.zip
+flora-batava.zip
+
+# Model files
+*.pth
+sam_vit_*.pth
+
+# Output directories
+masks/
+output_segments/
+output_segments_v1/
+checkpoints/
+
+# Excel lock files
+~$*.xlsx
+.~lock.*
+
+# Generated image files
+*.png
+*.jpg
+*.jpeg
+
+# Metadata files (but keep package configs)
+all_segments_metadata.json
+
+# Keep specific config files
+!package.json
+!tsconfig.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
