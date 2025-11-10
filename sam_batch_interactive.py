@@ -10,6 +10,10 @@ Process multiple illustration images from flora_meta.xlsx
 
 import argparse
 import json
+import os
+import shutil
+import signal
+import sys
 from pathlib import Path
 
 import cv2
@@ -90,7 +94,7 @@ def download_sam_model(model_type="vit_b", save_path=None):
 
 class BatchInteractiveSAM:
     def __init__(
-        self, data_dir, meta_file, model_path, mask_output_dir, model_type="vit_b"
+        self, data_dir, meta_file, model_path, mask_output_dir, model_type="vit_b", auto_mode=False
     ):
         # Load metadata
         print(f"Loading metadata from {meta_file}...")
@@ -139,6 +143,8 @@ class BatchInteractiveSAM:
         self.points = []
         self.labels = []
         self.current_mask = None
+        self.background_color = None
+        self.auto_mode = auto_mode
         self.window_name = (
             "Batch SAM - Click BACKGROUND | z: undo | s: save | "
             "b: back | n: next | r: reset | q: quit"
@@ -146,6 +152,10 @@ class BatchInteractiveSAM:
 
         # Window setup
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
 
     def load_metadata(self):
         """Load existing metadata file or create new dict"""
@@ -161,13 +171,52 @@ class BatchInteractiveSAM:
         return {}
 
     def save_metadata(self):
-        """Save metadata to JSON file"""
+        """Save metadata to JSON file atomically"""
+        # Block signals during critical write section
+        old_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
         try:
-            with open(self.metadata_file, "w") as f:
+            # Create backup of existing file
+            if self.metadata_file.exists():
+                backup_file = self.metadata_file.with_suffix(".json.bak")
+                shutil.copy2(self.metadata_file, backup_file)
+
+            # Write to temporary file first
+            temp_file = self.metadata_file.with_suffix(".json.tmp")
+            with open(temp_file, "w") as f:
                 json.dump(self.masks_metadata, f, indent=2)
+                f.flush()  # Flush Python buffer
+                os.fsync(f.fileno())  # Force OS to write to disk
+
+            # Atomic rename (won't corrupt if interrupted)
+            temp_file.replace(self.metadata_file)
             print(f"✓ Metadata saved to {self.metadata_file}")
         except Exception as e:
             print(f"Error saving metadata: {e}")
+        finally:
+            # Restore signal handlers
+            signal.signal(signal.SIGINT, old_sigint)
+            signal.signal(signal.SIGTERM, old_sigterm)
+
+    def signal_handler(self, sig, frame):
+        """Handle interrupt signals gracefully"""
+        print("I'm still saving")
+        print("Note: Any unsaved changes will be lost.")
+        print("Always press 's' to save before stopping the script.\n")
+
+        # Close OpenCV windows
+        cv2.destroyAllWindows()
+
+        # Print summary
+        processed_count = sum(
+            1 for img in self.illustrations if self.has_existing_mask(img)
+        )
+        print(f"{'='*60}")
+        print(f"SUMMARY: {processed_count}/{len(self.illustrations)} images processed")
+        print(f"{'='*60}\n")
+
+        sys.exit(0)
 
     def get_mask_path(self, image_name):
         """Get the path for the mask file"""
@@ -176,8 +225,10 @@ class BatchInteractiveSAM:
         return self.mask_output_dir / mask_name
 
     def has_existing_mask(self, image_name):
-        """Check if mask already exists for this image"""
-        return self.get_mask_path(image_name).exists()
+        """Check if segmented image already exists for this image"""
+        mask_path = self.get_mask_path(image_name)
+        segmented_path = str(mask_path).replace("_mask.png", "_segmented.png")
+        return Path(segmented_path).exists()
 
     def find_image_path(self, image_name):
         """Find image across all volumes (1-28)"""
@@ -187,6 +238,34 @@ class BatchInteractiveSAM:
             if image_path.exists():
                 return image_path
         return None
+
+    def sample_background_color(self, x, y, sample_radius=20):
+        """
+        Sample background color around a point.
+
+        Args:
+            x, y: Coordinates to sample from
+            sample_radius: Radius around point to sample
+
+        Returns:
+            Average RGB color as tuple of Python ints (R, G, B)
+        """
+        h, w = self.original_image.shape[:2]
+
+        # Get a small region around the point
+        y_start = max(0, y - sample_radius)
+        y_end = min(h, y + sample_radius)
+        x_start = max(0, x - sample_radius)
+        x_end = min(w, x + sample_radius)
+
+        region = self.original_image[y_start:y_end, x_start:x_end]
+
+        # Convert BGR to RGB and get average color
+        region_rgb = cv2.cvtColor(region, cv2.COLOR_BGR2RGB)
+        avg_color = np.mean(region_rgb, axis=(0, 1))
+
+        # Convert to Python ints (not numpy int64) for JSON serialization
+        return tuple(int(c) for c in avg_color)
 
     def load_image(self, image_name):
         """Load and prepare image for display"""
@@ -215,7 +294,7 @@ class BatchInteractiveSAM:
         self.crop_offset_x = crop_w
 
         self.cropped_image = self.original_image[
-            crop_h:h - crop_h, crop_w:w - crop_w
+            crop_h : h - crop_h, crop_w : w - crop_w
         ].copy()
 
         # Scale cropped image to fit screen if needed
@@ -249,8 +328,13 @@ class BatchInteractiveSAM:
         # This gives a good starting segmentation of the background
         auto_x = int(w * 0.95)  # 95% to the right
         auto_y = int(h * 0.05)  # 5% from top
-        self.add_point(auto_x, auto_y, positive=True)
+
+        # Sample background color at this point
+        self.background_color = self.sample_background_color(auto_x, auto_y)
         print(f"Auto-added background point at upper right corner ({auto_x}, {auto_y})")
+        print(f"Sampled background color: RGB{self.background_color}")
+
+        self.add_point(auto_x, auto_y, positive=True)
 
         return True
 
@@ -390,7 +474,7 @@ class BatchInteractiveSAM:
         h, w = self.original_image.shape[:2]
         crop_h = int(h * self.crop_percent)
         crop_w = int(w * self.crop_percent)
-        cropped_display = full_image[crop_h:h - crop_h, crop_w:w - crop_w]
+        cropped_display = full_image[crop_h : h - crop_h, crop_w : w - crop_w]
 
         # Scale for display if needed
         if self.scale_factor != 1.0:
@@ -428,19 +512,21 @@ class BatchInteractiveSAM:
         # Create final mask with borders excluded (ensure numpy array)
         final_object_mask = np.array(object_mask, copy=True)
         final_object_mask[:crop_h, :] = False  # Top border
-        final_object_mask[h - crop_h:, :] = False  # Bottom border
+        final_object_mask[h - crop_h :, :] = False  # Bottom border
         final_object_mask[:, :crop_w] = False  # Left border
-        final_object_mask[:, w - crop_w:] = False  # Right border
+        final_object_mask[:, w - crop_w :] = False  # Right border
 
         # Calculate mask area (number of pixels) for the object (excluding borders)
         mask_area = int(np.sum(final_object_mask))
 
-        # Save the segmented object (original size, with borders excluded)
-        segmented = self.original_image.copy()
-        segmented[~final_object_mask] = 0
+        # Save the segmented object with transparent background (RGBA)
+        # Convert BGR to BGRA
+        segmented = cv2.cvtColor(self.original_image.copy(), cv2.COLOR_BGR2BGRA)
+        # Set alpha channel: 255 for object, 0 for background
+        segmented[:, :, 3] = (final_object_mask * 255).astype(np.uint8)
         segmented_path = str(mask_path).replace("_mask.png", "_segmented.png")
         cv2.imwrite(segmented_path, segmented)
-        print(f"✓ Segmented object saved to {segmented_path} (borders excluded)")
+        print(f"✓ Segmented object saved to {segmented_path} (with transparent background)")
 
         # Update metadata
         mask_entry = {
@@ -452,6 +538,7 @@ class BatchInteractiveSAM:
                 "height": h,
                 "width": w,
             },
+            "background_color_rgb": self.background_color,
         }
 
         # Use mask filename as key for easy lookup
@@ -491,8 +578,61 @@ class BatchInteractiveSAM:
 
         return self.show_current_image()
 
+    def run_auto(self):
+        """Automatic processing mode - no user interaction"""
+        print("\n" + "=" * 60)
+        print("AUTOMATIC SAM SEGMENTATION")
+        print("=" * 60)
+        print("Processing all unprocessed images automatically...")
+        print("Using auto background point (upper right corner)")
+        print("=" * 60 + "\n")
+
+        processed = 0
+        skipped = 0
+
+        for idx in range(len(self.illustrations)):
+            self.current_index = idx
+            image_name = self.illustrations[self.current_index]
+
+            # Skip if already processed
+            if self.has_existing_mask(image_name):
+                skipped += 1
+                continue
+
+            print(f"\n[{idx + 1}/{len(self.illustrations)}] Processing: {image_name}")
+
+            # Load image (this adds the auto background point)
+            if not self.load_image(image_name):
+                print(f"  ✗ Failed to load image")
+                continue
+
+            # The auto point was already added in load_image, mask should be ready
+            if self.current_mask is not None:
+                # Save the mask
+                if self.save_current_mask():
+                    print(f"  ✓ Saved successfully")
+                    processed += 1
+                else:
+                    print(f"  ✗ Failed to save")
+            else:
+                print(f"  ✗ No mask generated")
+
+        # Print final summary
+        print(f"\n{'='*60}")
+        print(f"AUTOMATIC PROCESSING COMPLETE")
+        print(f"{'='*60}")
+        print(f"Processed: {processed}")
+        print(f"Skipped (already done): {skipped}")
+        print(f"Total: {len(self.illustrations)}")
+        print(f"{'='*60}\n")
+
     def run(self):
         """Main loop"""
+        # If auto mode, run automatic processing
+        if self.auto_mode:
+            self.run_auto()
+            return
+
         print("\n" + "=" * 60)
         print("BATCH INTERACTIVE SAM SEGMENTATION")
         print("=" * 60)
@@ -591,6 +731,11 @@ def main():
         help="SAM model type",
     )
     parser.add_argument("--output", default="masks", help="Output directory for masks")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Automatic mode: process all images with auto background point only"
+    )
 
     args = parser.parse_args()
 
@@ -601,6 +746,7 @@ def main():
             model_path=args.model,
             mask_output_dir=args.output,
             model_type=args.model_type,
+            auto_mode=args.auto,
         )
         app.run()
     except Exception as e:

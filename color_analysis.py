@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""
+Color Analysis Tool for Segmented Images
+
+Extracts dominant colors from segmented flora images:
+- Extracts top 5 dominant colors using k-means clustering
+- Provides both RGB and HSL color representations
+- Filters out background colors (optional)
+- Updates metadata with color information
+"""
+
+import argparse
+import colorsys
+import json
+from pathlib import Path
+
+import cv2
+import numpy as np
+from sklearn.cluster import KMeans
+from tqdm import tqdm
+
+
+def rgb_to_hsl(r, g, b):
+    """Convert RGB (0-255) to HSL (H: 0-360, S: 0-100, L: 0-100)"""
+    h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    return (int(h * 360), int(s * 100), int(l * 100))
+
+
+def color_distance(color1, color2):
+    """
+    Calculate Euclidean distance between two RGB colors.
+
+    Args:
+        color1: Tuple of (R, G, B) values
+        color2: Tuple of (R, G, B) values
+
+    Returns:
+        Distance as a float
+    """
+    r1, g1, b1 = color1
+    r2, g2, b2 = color2
+    return np.sqrt((r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2)
+
+
+def is_similar_to_background(rgb, background_rgb, tolerance=50):
+    """
+    Check if a color is similar to the background color.
+
+    Args:
+        rgb: Tuple of (R, G, B) values to check
+        background_rgb: Background color as (R, G, B) tuple
+        tolerance: Maximum distance to consider colors similar (0-441)
+
+    Returns:
+        True if the color is similar to the background
+    """
+    if background_rgb is None:
+        return False
+
+    distance = color_distance(rgb, background_rgb)
+    return distance <= tolerance
+
+
+def calculate_visual_importance(rgb, hsl, percentage, all_colors):
+    """
+    Calculate visual importance score combining frequency, saturation, and contrast.
+
+    Args:
+        rgb: RGB tuple of the color
+        hsl: HSL tuple of the color (H, S, L)
+        percentage: Frequency percentage
+        all_colors: List of all RGB colors for contrast calculation
+
+    Returns:
+        Visual importance score (higher = more important)
+    """
+    # Saturation component (0-100) - more saturated colors are more visually important
+    saturation_score = hsl[1] / 100.0
+
+    # Calculate average distance to other colors (contrast)
+    if len(all_colors) > 1:
+        distances = [color_distance(rgb, other_rgb) for other_rgb in all_colors if other_rgb != rgb]
+        avg_distance = np.mean(distances) if distances else 0
+        # Normalize to 0-1 (max distance in RGB space is ~441)
+        contrast_score = min(avg_distance / 200.0, 1.0)
+    else:
+        contrast_score = 0
+
+    # Frequency component (already 0-100, normalize to 0-1)
+    frequency_score = percentage / 100.0
+
+    # Weighted combination: 40% frequency, 30% saturation, 30% contrast
+    # This gives frequency most weight but still values visually distinct colors
+    importance = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
+
+    return importance
+
+
+def extract_dominant_colors(
+    image,
+    n_colors=5,
+    filter_background=True,
+    background_color=None,
+    background_tolerance=50,
+    sample_size=10000,
+    calculate_both=False
+):
+    """
+    Extract dominant colors from an image using k-means clustering.
+
+    Args:
+        image: BGR image (OpenCV format)
+        n_colors: Number of dominant colors to extract
+        filter_background: Whether to filter out background colors
+        background_color: RGB tuple of background color to filter out
+        background_tolerance: Tolerance for background color similarity
+        sample_size: Number of pixels to sample (for performance)
+        calculate_both: If True, return dict with both frequency and visual importance rankings
+
+    Returns:
+        If calculate_both=False: List of color dictionaries (sorted by frequency)
+        If calculate_both=True: Dict with 'frequency' and 'visual' keys, each containing color lists
+    """
+    # Convert BGR to RGB
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    # Get only non-zero pixels (masked object)
+    # Create a mask of non-black pixels
+    mask = np.any(image_rgb != [0, 0, 0], axis=-1)
+    pixels = image_rgb[mask]
+
+    if len(pixels) == 0:
+        print("Warning: No non-zero pixels found in image")
+        return []
+
+    # Sample pixels if there are too many (for performance)
+    if len(pixels) > sample_size:
+        indices = np.random.choice(len(pixels), sample_size, replace=False)
+        pixels = pixels[indices]
+
+    # Reshape for k-means
+    pixels = pixels.reshape(-1, 3)
+
+    # Perform k-means clustering
+    # Try to extract more colors initially if we're filtering
+    n_clusters = n_colors * 2 if filter_background else n_colors
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    kmeans.fit(pixels)
+
+    # Get cluster centers (dominant colors) and their frequencies
+    colors = kmeans.cluster_centers_.astype(int)
+    labels = kmeans.labels_
+
+    # Calculate percentage for each color
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    total_pixels = len(labels)
+
+    # Create color data with percentages
+    color_data = []
+    all_rgb_colors = []
+
+    for label, count in zip(unique_labels, counts):
+        rgb = tuple(colors[label])
+        percentage = (count / total_pixels) * 100
+
+        # Filter background colors if requested
+        if filter_background and background_color is not None:
+            if is_similar_to_background(rgb, background_color, background_tolerance):
+                continue
+
+        hsl = rgb_to_hsl(*rgb)
+        all_rgb_colors.append(rgb)
+
+        color_data.append({
+            'rgb': [int(rgb[0]), int(rgb[1]), int(rgb[2])],
+            'hsl': [int(hsl[0]), int(hsl[1]), int(hsl[2])],
+            'percentage': round(float(percentage), 2),
+            'hex': '#{:02x}{:02x}{:02x}'.format(*rgb),
+            'rgb_tuple': rgb,  # Keep for visual importance calculation
+            'hsl_tuple': hsl
+        })
+
+    # Always calculate visual importance for all colors
+    if len(color_data) > 0:
+        for color in color_data:
+            importance = calculate_visual_importance(
+                color['rgb_tuple'],
+                color['hsl_tuple'],
+                color['percentage'],
+                all_rgb_colors
+            )
+            color['visual_importance'] = round(importance, 4)
+
+    # If calculate_both, return both rankings
+    if calculate_both:
+        # Create frequency-sorted list
+        frequency_sorted = sorted(color_data, key=lambda x: x['percentage'], reverse=True)
+        # Create visual importance-sorted list
+        visual_sorted = sorted(color_data, key=lambda x: x['visual_importance'], reverse=True)
+
+        # Clean up temporary fields for both lists
+        for color in frequency_sorted + visual_sorted:
+            color.pop('rgb_tuple', None)
+            color.pop('hsl_tuple', None)
+
+        return {
+            'frequency': frequency_sorted[:n_colors],
+            'visual': visual_sorted[:n_colors]
+        }
+    else:
+        # Default: sort by percentage (most dominant first)
+        color_data.sort(key=lambda x: x['percentage'], reverse=True)
+
+        # Clean up temporary fields
+        for color in color_data:
+            color.pop('rgb_tuple', None)
+            color.pop('hsl_tuple', None)
+
+        # Return only top n_colors
+        return color_data[:n_colors]
+
+
+class ColorAnalyzer:
+    def __init__(
+        self,
+        mask_output_dir,
+        n_colors=5,
+        filter_background=True,
+        background_tolerance=50
+    ):
+        """
+        Initialize Color Analyzer.
+
+        Args:
+            mask_output_dir: Directory containing segmented images and metadata
+            n_colors: Number of dominant colors to extract per image
+            filter_background: Whether to filter out background colors
+            background_tolerance: Color distance tolerance for background filtering
+        """
+        self.mask_output_dir = Path(mask_output_dir)
+        self.n_colors = n_colors
+        self.filter_background = filter_background
+        self.background_tolerance = background_tolerance
+
+        # Load existing metadata
+        self.metadata_file = self.mask_output_dir / "masks_metadata.json"
+        self.masks_metadata = self.load_metadata()
+
+        if not self.masks_metadata:
+            raise ValueError(f"No metadata found at {self.metadata_file}")
+
+        print(f"Loaded metadata with {len(self.masks_metadata)} entries")
+
+    def load_metadata(self):
+        """Load existing metadata file"""
+        if self.metadata_file.exists():
+            try:
+                with open(self.metadata_file, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error loading metadata: {e}")
+                return {}
+        return {}
+
+    def save_metadata(self):
+        """Save updated metadata to JSON file"""
+        try:
+            with open(self.metadata_file, "w") as f:
+                json.dump(self.masks_metadata, f, indent=2)
+            print(f"✓ Metadata saved to {self.metadata_file}")
+        except Exception as e:
+            print(f"Error saving metadata: {e}")
+
+    def process_all_images(self):
+        """Process all segmented images and extract colors"""
+        print(f"\nProcessing {len(self.masks_metadata)} segmented images...")
+        print(f"Extracting top {self.n_colors} colors per image")
+        print("Computing both frequency and visual importance rankings")
+        if self.filter_background:
+            print(f"Background filtering: enabled (tolerance: {self.background_tolerance})")
+        else:
+            print("Background filtering: disabled")
+        print()
+
+        processed = 0
+        skipped = 0
+        errors = 0
+
+        for mask_key, entry in tqdm(self.masks_metadata.items(), desc="Analyzing colors"):
+            # Skip if colors already extracted (both methods)
+            if 'colors_frequency' in entry and 'colors_visual' in entry and entry['colors_frequency'] and entry['colors_visual']:
+                skipped += 1
+                continue
+
+            # Get segmented image path
+            segmented_file = entry.get('segmented_file')
+            if not segmented_file:
+                print(f"Warning: No segmented_file in entry {mask_key}")
+                errors += 1
+                continue
+
+            segmented_path = self.mask_output_dir / segmented_file
+
+            if not segmented_path.exists():
+                print(f"Warning: Segmented image not found: {segmented_path}")
+                errors += 1
+                continue
+
+            try:
+                # Load segmented image
+                image = cv2.imread(str(segmented_path))
+
+                if image is None:
+                    print(f"Warning: Could not load image {segmented_path}")
+                    errors += 1
+                    continue
+
+                # Get background color from metadata if available
+                background_color = entry.get('background_color_rgb')
+                if background_color and isinstance(background_color, list):
+                    background_color = tuple(background_color)
+
+                # Extract colors (both ranking methods)
+                color_results = extract_dominant_colors(
+                    image,
+                    n_colors=self.n_colors,
+                    filter_background=self.filter_background,
+                    background_color=background_color,
+                    background_tolerance=self.background_tolerance,
+                    calculate_both=True
+                )
+
+                # Update metadata with both rankings
+                entry['colors_frequency'] = color_results['frequency']
+                entry['colors_visual'] = color_results['visual']
+                # Keep 'colors' as default (frequency) for backwards compatibility
+                entry['colors'] = color_results['frequency']
+                entry['n_colors_extracted'] = len(color_results['frequency'])
+
+                processed += 1
+
+            except Exception as e:
+                print(f"Error processing {segmented_file}: {e}")
+                errors += 1
+
+        # Save updated metadata
+        self.save_metadata()
+
+        # Print summary
+        print(f"\n{'='*60}")
+        print(f"COLOR ANALYSIS SUMMARY")
+        print(f"{'='*60}")
+        print(f"Processed: {processed}")
+        print(f"Skipped (already done): {skipped}")
+        print(f"Errors: {errors}")
+        print(f"Total: {len(self.masks_metadata)}")
+        print(f"{'='*60}")
+
+    def show_color_stats(self):
+        """Show statistics about extracted colors"""
+        total_colors = 0
+        images_with_colors = 0
+
+        for entry in self.masks_metadata.values():
+            # Check for both new and old format
+            if 'colors_frequency' in entry and entry['colors_frequency']:
+                images_with_colors += 1
+                total_colors += len(entry['colors_frequency'])
+            elif 'colors' in entry and entry['colors']:
+                images_with_colors += 1
+                total_colors += len(entry['colors'])
+
+        if images_with_colors > 0:
+            avg_colors = total_colors / images_with_colors
+            print(f"\nColor extraction statistics:")
+            print(f"  Images with colors: {images_with_colors}/{len(self.masks_metadata)}")
+            print(f"  Total colors extracted: {total_colors} (per ranking method)")
+            print(f"  Average colors per image: {avg_colors:.1f}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Extract dominant colors from segmented images"
+    )
+    parser.add_argument(
+        "--masks-dir",
+        default="masks",
+        help="Directory containing masks and segmented images"
+    )
+    parser.add_argument(
+        "--n-colors",
+        type=int,
+        default=5,
+        help="Number of dominant colors to extract (default: 5)"
+    )
+    parser.add_argument(
+        "--no-filter-background",
+        action="store_true",
+        help="Don't filter out background colors"
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=int,
+        default=50,
+        help="Color distance tolerance for background filtering (default: 50)"
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Show color extraction statistics only (don't process)"
+    )
+
+    args = parser.parse_args()
+
+    try:
+        analyzer = ColorAnalyzer(
+            mask_output_dir=args.masks_dir,
+            n_colors=args.n_colors,
+            filter_background=not args.no_filter_background,
+            background_tolerance=args.tolerance
+        )
+
+        if args.stats:
+            analyzer.show_color_stats()
+        else:
+            analyzer.process_all_images()
+            analyzer.show_color_stats()
+
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()
