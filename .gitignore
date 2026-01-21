@@ -75,3 +75,6 @@ all_segments_metadata.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Git worktrees
+.worktrees/
