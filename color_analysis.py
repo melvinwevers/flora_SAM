@@ -368,8 +368,14 @@ class ColorAnalyzer:
         errors = 0
 
         for mask_key, entry in tqdm(self.masks_metadata.items(), desc="Analyzing colors"):
-            # Skip if colors already extracted (both methods)
-            if 'colors_frequency' in entry and 'colors_visual' in entry and entry['colors_frequency'] and entry['colors_visual']:
+            # Skip if colors already extracted with new three-ranking system
+            # Check for perceptual_weight and saliency_weight fields in colors
+            has_new_format = False
+            if 'colors_visual' in entry and entry['colors_visual']:
+                first_color = entry['colors_visual'][0] if entry['colors_visual'] else {}
+                has_new_format = 'perceptual_weight' in first_color and 'saliency_weight' in first_color
+
+            if has_new_format and 'colors_frequency' in entry and entry['colors_frequency']:
                 skipped += 1
                 continue
 

@@ -178,10 +178,16 @@ def get_color_palette(plant_id, ranking='frequency'):
         'frequency': 'color_freq',
         'perceptual': 'color_perceptual',
         'saliency': 'color_saliency',
-        'visual': 'color_saliency'  # backwards compatibility
+        'visual': 'color_visual'  # backwards compatibility
     }
 
     prefix = prefix_map.get(ranking, 'color_freq')
+
+    # Fallback for missing columns (until data regeneration)
+    # Check if first column exists, if not fall back to color_visual
+    test_col = f'{prefix}_1_hex'
+    if test_col not in plant:
+        prefix = 'color_visual'
 
     colors = []
     for i in range(1, 6):
