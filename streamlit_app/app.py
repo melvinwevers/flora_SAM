@@ -32,27 +32,36 @@ historical botanical illustrations through multiple lenses:
 Use the sidebar to navigate between different views.
 """)
 
-with st.expander("ℹ️ How is visual salience calculated?"):
+with st.expander("ℹ️ How is visual importance calculated?"):
     st.markdown("""
     The app shows two color rankings for each plant:
 
     1. **Frequency Ranking**: Colors sorted by area coverage (most common first)
-    2. **Visual Importance Ranking**: Colors sorted by visual salience
+    2. **Visual Importance Ranking**: Colors weighted by perceptual distinctiveness and spatial salience
 
-    **Visual Salience Score** combines three factors to identify colors that catch the eye:
+    ### Visual Importance Score
 
-    - **Frequency (40%)**: How much area the color covers
-    - **Saturation (30%)**: How vivid/pure the color is (more saturated = more noticeable)
-    - **Contrast (30%)**: How different the color is from other colors in the image
+    This combines two complementary methods:
 
-    **Formula**: `importance = 0.4×frequency + 0.3×saturation + 0.3×contrast`
+    **1. Perceptual Weight (40%)** - A heuristic based on color properties:
+    - Frequency: How much area the color covers
+    - Saturation: How vivid/pure the color is
+    - Contrast: How different from other colors in the palette
+    - Formula: `0.4×frequency + 0.3×saturation + 0.3×contrast`
 
-    This means a small but highly saturated, contrasting color (like a bright red flower center)
-    can rank higher than a large but dull color (like grayish-green leaves).
+    **2. Spatial Salience (60%)** - True visual attention analysis:
+    - Uses Spectral Residual method (or edge-based fallback)
+    - Detects regions that naturally draw eye attention
+    - Weights colors by their overlap with high-salience areas
 
-    **Why this matters**: Visual salience better captures which colors draw human attention,
-    making it useful for finding plants with distinctive color features like bright flowers,
-    vibrant berries, or striking foliage patterns.
+    **Combined**: `importance = 0.6×saliency + 0.4×perceptual`
+
+    ### Why This Matters
+
+    A small but bright red flower center in a high-salience region will rank higher than
+    large but dull grayish-green leaves in low-attention areas. This helps identify
+    botanically distinctive features like vibrant flowers, colorful berries, or striking
+    foliage patterns that would naturally catch a viewer's eye.
     """)
 
 # Load data

@@ -61,9 +61,11 @@ def is_similar_to_background(rgb, background_rgb, tolerance=50):
     return distance <= tolerance
 
 
-def calculate_visual_importance(rgb, hsl, percentage, all_colors):
+def calculate_perceptual_weight(rgb, hsl, percentage, all_colors):
     """
-    Calculate visual importance score combining frequency, saturation, and contrast.
+    Calculate perceptual weight combining frequency, saturation, and contrast.
+
+    This is a heuristic for color palette ranking, NOT true visual salience.
 
     Args:
         rgb: RGB tuple of the color
@@ -72,9 +74,9 @@ def calculate_visual_importance(rgb, hsl, percentage, all_colors):
         all_colors: List of all RGB colors for contrast calculation
 
     Returns:
-        Visual importance score (higher = more important)
+        Perceptual weight score (higher = more perceptually distinctive)
     """
-    # Saturation component (0-100) - more saturated colors are more visually important
+    # Saturation component (0-100) - more saturated colors are more perceptually distinctive
     saturation_score = hsl[1] / 100.0
 
     # Calculate average distance to other colors (contrast)
@@ -91,9 +93,78 @@ def calculate_visual_importance(rgb, hsl, percentage, all_colors):
 
     # Weighted combination: 40% frequency, 30% saturation, 30% contrast
     # This gives frequency most weight but still values visually distinct colors
-    importance = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
+    weight = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
 
-    return importance
+    return weight
+
+
+def calculate_saliency_weight(image, rgb, mask=None):
+    """
+    Calculate true visual salience weight using OpenCV's spectral residual saliency.
+
+    This measures actual visual attention by analyzing spatial frequencies.
+    Falls back to simple edge-based saliency if opencv-contrib is not available.
+
+    Args:
+        image: BGR image (OpenCV format)
+        rgb: RGB tuple of the color to weight
+        mask: Optional binary mask of the segmented object
+
+    Returns:
+        Saliency weight (0-1, higher = more salient)
+    """
+    try:
+        # Convert to RGB for saliency detection
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Try OpenCV contrib saliency module
+        if hasattr(cv2, 'saliency'):
+            # Create saliency detector using Spectral Residual method
+            saliency_detector = cv2.saliency.StaticSaliencySpectralResidual_create()
+            success, saliency_map = saliency_detector.computeSaliency(image_rgb)
+
+            if not success:
+                raise ValueError("Saliency computation failed")
+        else:
+            # Fallback: simple edge-based saliency approximation
+            # Convert to grayscale
+            gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+
+            # Compute edges using Sobel
+            sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            edge_magnitude = np.sqrt(sobelx**2 + sobely**2)
+
+            # Normalize to 0-1
+            if edge_magnitude.max() > 0:
+                saliency_map = edge_magnitude / edge_magnitude.max()
+            else:
+                saliency_map = edge_magnitude
+
+            # Smooth the saliency map
+            saliency_map = cv2.GaussianBlur(saliency_map, (9, 9), 0)
+
+        # Apply mask if provided
+        if mask is not None:
+            saliency_map = saliency_map * mask
+
+        # Create color mask for this specific color (with tolerance)
+        tolerance = 30
+        lower = np.array([max(0, rgb[0]-tolerance), max(0, rgb[1]-tolerance), max(0, rgb[2]-tolerance)])
+        upper = np.array([min(255, rgb[0]+tolerance), min(255, rgb[1]+tolerance), min(255, rgb[2]+tolerance)])
+        color_mask = cv2.inRange(image_rgb, lower, upper)
+
+        # Get mean saliency where this color appears
+        if np.any(color_mask):
+            saliency_for_color = saliency_map[color_mask > 0]
+            mean_saliency = np.mean(saliency_for_color)
+            return float(mean_saliency)
+        else:
+            return 0.0
+
+    except Exception as e:
+        print(f"Warning: Saliency calculation failed: {e}")
+        return 0.0
 
 
 def extract_dominant_colors(
@@ -183,13 +254,23 @@ def extract_dominant_colors(
     # Always calculate visual importance for all colors
     if len(color_data) > 0:
         for color in color_data:
-            importance = calculate_visual_importance(
+            # Calculate perceptual weight (heuristic)
+            perceptual = calculate_perceptual_weight(
                 color['rgb_tuple'],
                 color['hsl_tuple'],
                 color['percentage'],
                 all_rgb_colors
             )
-            color['visual_importance'] = round(importance, 4)
+            color['perceptual_weight'] = round(perceptual, 4)
+
+            # Calculate true visual salience (OpenCV spectral residual)
+            saliency = calculate_saliency_weight(image, color['rgb_tuple'])
+            color['saliency_weight'] = round(saliency, 4)
+
+            # Combined weight: blend perceptual and saliency
+            # 60% saliency (spatial attention), 40% perceptual (color properties)
+            combined = (0.6 * saliency) + (0.4 * perceptual)
+            color['visual_importance'] = round(combined, 4)
 
     # If calculate_both, return both rankings
     if calculate_both:
