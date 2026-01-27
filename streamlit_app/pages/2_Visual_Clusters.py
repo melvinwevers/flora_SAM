@@ -65,8 +65,8 @@ col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
     color_ranking = st.radio(
         "Color Ranking",
-        options=["frequency", "visual"],
-        format_func=lambda x: "By Area" if x == "frequency" else "Visual Importance",
+        options=["frequency", "perceptual", "saliency"],
+        format_func=lambda x: {"frequency": "Frequency", "perceptual": "Perceptual", "saliency": "Salience"}[x],
         horizontal=True
     )
 

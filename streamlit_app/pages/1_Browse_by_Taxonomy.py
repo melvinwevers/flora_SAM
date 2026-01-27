@@ -46,8 +46,8 @@ st.sidebar.header("Display Options")
 # Color ranking toggle
 color_ranking = st.sidebar.radio(
     "Color Ranking",
-    options=["frequency", "visual"],
-    format_func=lambda x: "By Area" if x == "frequency" else "Visual Importance"
+    options=["frequency", "perceptual", "saliency"],
+    format_func=lambda x: {"frequency": "Frequency", "perceptual": "Perceptual", "saliency": "Salience"}[x]
 )
 
 # Number of colors

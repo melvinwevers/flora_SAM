@@ -60,9 +60,9 @@ with col2:
         # Color ranking selection
         color_ranking = st.radio(
             "Color Ranking Method",
-            options=["frequency", "visual"],
-            format_func=lambda x: "By Area" if x == "frequency" else "Visual Importance",
-            help="Frequency ranks by pixel area, Visual Importance uses perceptual weighting"
+            options=["frequency", "perceptual", "saliency"],
+            format_func=lambda x: {"frequency": "Frequency", "perceptual": "Perceptual", "saliency": "Salience"}[x],
+            help="Frequency: area coverage | Perceptual: color properties | Salience: spatial attention"
         )
 
     with col2b:
