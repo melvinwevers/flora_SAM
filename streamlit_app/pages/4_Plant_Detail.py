@@ -73,23 +73,31 @@ with col2:
 # Color palettes
 st.header("Color Palettes")
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.subheader("Frequency Ranking")
-    st.caption("Colors ranked by area coverage")
+    st.subheader("Frequency")
+    st.caption("By area coverage")
 
     colors_freq = data_loader.get_color_palette(plant_id, ranking='frequency')
     if colors_freq:
         st.markdown(charts.create_color_palette_display(colors_freq), unsafe_allow_html=True)
 
 with col2:
-    st.subheader("Visual Importance Ranking")
-    st.caption("Colors ranked by visual saliency")
+    st.subheader("Perceptual")
+    st.caption("By color properties")
 
-    colors_visual = data_loader.get_color_palette(plant_id, ranking='visual')
-    if colors_visual:
-        st.markdown(charts.create_color_palette_display(colors_visual), unsafe_allow_html=True)
+    colors_perceptual = data_loader.get_color_palette(plant_id, ranking='perceptual')
+    if colors_perceptual:
+        st.markdown(charts.create_color_palette_display(colors_perceptual), unsafe_allow_html=True)
+
+with col3:
+    st.subheader("Salience")
+    st.caption("By spatial attention")
+
+    colors_saliency = data_loader.get_color_palette(plant_id, ranking='saliency')
+    if colors_saliency:
+        st.markdown(charts.create_color_palette_display(colors_saliency), unsafe_allow_html=True)
 
 # Cluster membership
 st.header("Visual Cluster Membership")

@@ -254,7 +254,7 @@ def extract_dominant_colors(
     # Always calculate visual importance for all colors
     if len(color_data) > 0:
         for color in color_data:
-            # Calculate perceptual weight (heuristic)
+            # Calculate perceptual weight (heuristic based on color properties)
             perceptual = calculate_perceptual_weight(
                 color['rgb_tuple'],
                 color['hsl_tuple'],
@@ -267,26 +267,26 @@ def extract_dominant_colors(
             saliency = calculate_saliency_weight(image, color['rgb_tuple'])
             color['saliency_weight'] = round(saliency, 4)
 
-            # Combined weight: blend perceptual and saliency
-            # 60% saliency (spatial attention), 40% perceptual (color properties)
-            combined = (0.6 * saliency) + (0.4 * perceptual)
-            color['visual_importance'] = round(combined, 4)
+            # For backwards compatibility, use saliency as primary
+            color['visual_importance'] = round(saliency, 4)
 
-    # If calculate_both, return both rankings
+    # If calculate_both, return all three rankings
     if calculate_both:
-        # Create frequency-sorted list
+        # Create three sorted lists
         frequency_sorted = sorted(color_data, key=lambda x: x['percentage'], reverse=True)
-        # Create visual importance-sorted list
-        visual_sorted = sorted(color_data, key=lambda x: x['visual_importance'], reverse=True)
+        perceptual_sorted = sorted(color_data, key=lambda x: x['perceptual_weight'], reverse=True)
+        saliency_sorted = sorted(color_data, key=lambda x: x['saliency_weight'], reverse=True)
 
-        # Clean up temporary fields for both lists
-        for color in frequency_sorted + visual_sorted:
+        # Clean up temporary fields for all lists
+        all_colors = frequency_sorted + perceptual_sorted + saliency_sorted
+        for color in all_colors:
             color.pop('rgb_tuple', None)
             color.pop('hsl_tuple', None)
 
         return {
             'frequency': frequency_sorted[:n_colors],
-            'visual': visual_sorted[:n_colors]
+            'perceptual': perceptual_sorted[:n_colors],
+            'saliency': saliency_sorted[:n_colors]
         }
     else:
         # Default: sort by percentage (most dominant first)

@@ -11,10 +11,35 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 THUMBNAILS_DIR = Path(__file__).parent.parent / "thumbnails"
 
 @st.cache_data
+def load_dutch_names():
+    """Load Flora Batava Index with Dutch names.
+
+    The Flora Batava Index rows align with plants_metadata rows by index.
+    """
+    df = pd.read_excel(DATA_DIR / "Flora Batava Index.xlsx")
+
+    # Select relevant columns - the index alignment is maintained
+    result = df[['Huidige Nederlandse naam', 'Oude Nederlandse naam in Flora Batava',
+                 'Huidige botanische naam', 'Link naar scans in bladerboek KB']].copy()
+
+    return result
+
+@st.cache_data
 def load_plants_metadata():
     """Load plants metadata CSV with colors and taxonomy."""
     df = pd.read_csv(DATA_DIR / "plants_metadata.csv")
-    return df
+
+    # Merge with Dutch names by index (rows align between files)
+    dutch_names = load_dutch_names()
+
+    # Reset index to ensure alignment, then concat along columns
+    df_reset = df.reset_index(drop=True)
+    dutch_reset = dutch_names.reset_index(drop=True)
+
+    # Concatenate side by side (since rows align)
+    df_merged = pd.concat([df_reset, dutch_reset], axis=1)
+
+    return df_merged
 
 @st.cache_data
 def load_cluster_assignments():
@@ -40,8 +65,8 @@ def load_merged_data():
 
 def get_thumbnail_path(plant_id):
     """Get thumbnail path for a plant_id."""
-    # Thumbnails are named without .tif extension
-    return THUMBNAILS_DIR / f"{plant_id}.jpg"
+    # Thumbnails are named {plant_id}.tif.jpg
+    return THUMBNAILS_DIR / f"{plant_id}.tif.jpg"
 
 def get_families():
     """Get list of unique families with counts."""
@@ -136,13 +161,27 @@ def get_related_plants(plant_id, limit=6):
     return related.head(limit)
 
 def get_color_palette(plant_id, ranking='frequency'):
-    """Get color palette for a plant."""
+    """
+    Get color palette for a plant.
+
+    Args:
+        plant_id: Plant identifier
+        ranking: One of 'frequency', 'perceptual', or 'saliency'
+    """
     plant = get_plant_details(plant_id)
 
     if not plant:
         return []
 
-    prefix = 'color_freq' if ranking == 'frequency' else 'color_visual'
+    # Map ranking names to column prefixes
+    prefix_map = {
+        'frequency': 'color_freq',
+        'perceptual': 'color_perceptual',
+        'saliency': 'color_saliency',
+        'visual': 'color_saliency'  # backwards compatibility
+    }
+
+    prefix = prefix_map.get(ranking, 'color_freq')
 
     colors = []
     for i in range(1, 6):
@@ -156,3 +195,109 @@ def get_color_palette(plant_id, ranking='frequency'):
             })
 
     return colors
+
+def get_dominant_color(plant_id, ranking='frequency'):
+    """Get the dominant (first) color for a plant."""
+    colors = get_color_palette(plant_id, ranking)
+    if colors:
+        return colors[0]['hex']
+    return None
+
+@st.cache_data
+def get_plants_by_color_bucket(bucket_name, ranking='frequency'):
+    """Get all plants whose dominant color falls in the given bucket."""
+    from .color_utils import categorize_color
+
+    df = load_merged_data()
+
+    # Get dominant color column
+    color_col = f'color_freq_1_hex' if ranking == 'frequency' else 'color_visual_1_hex'
+
+    # Filter plants that have a dominant color
+    df_with_color = df[df[color_col].notna()].copy()
+
+    # Categorize each plant's dominant color
+    df_with_color['color_bucket'] = df_with_color[color_col].apply(categorize_color)
+
+    # Filter by bucket
+    return df_with_color[df_with_color['color_bucket'] == bucket_name]
+
+@st.cache_data
+def get_color_bucket_stats(ranking='frequency'):
+    """Get count of plants in each color bucket."""
+    from .color_utils import categorize_color, COLOR_BUCKETS
+
+    df = load_merged_data()
+
+    # Get dominant color column
+    color_col = f'color_freq_1_hex' if ranking == 'frequency' else 'color_visual_1_hex'
+
+    # Filter plants that have a dominant color
+    df_with_color = df[df[color_col].notna()].copy()
+
+    # Categorize each plant's dominant color
+    df_with_color['color_bucket'] = df_with_color[color_col].apply(categorize_color)
+
+    # Count plants per bucket
+    counts = df_with_color['color_bucket'].value_counts().to_dict()
+
+    # Return in bucket order, excluding Unknown
+    result = {}
+    for bucket_name in COLOR_BUCKETS.keys():
+        if bucket_name in counts:
+            result[bucket_name] = counts[bucket_name]
+
+    return result
+
+def color_distance(hex1, hex2):
+    """Calculate Euclidean distance between two hex colors in RGB space."""
+    from .color_utils import hex_to_hsv
+
+    try:
+        # Convert to RGB
+        def hex_to_rgb(hex_color):
+            hex_color = hex_color.lstrip('#')
+            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+        rgb1 = hex_to_rgb(hex1)
+        rgb2 = hex_to_rgb(hex2)
+
+        # Euclidean distance in RGB space
+        return sum((a - b) ** 2 for a, b in zip(rgb1, rgb2)) ** 0.5
+    except:
+        return float('inf')
+
+@st.cache_data
+def get_plants_by_color_similarity(target_hex, ranking='frequency', max_distance=50, limit=None):
+    """Get plants whose dominant color is similar to the target color.
+
+    Args:
+        target_hex: Target hex color (e.g., '#FF5733')
+        ranking: 'frequency' or 'visual'
+        max_distance: Maximum RGB distance (0-441, lower is more similar)
+        limit: Maximum number of plants to return
+
+    Returns:
+        DataFrame of plants sorted by color similarity
+    """
+    df = load_merged_data()
+
+    # Get dominant color column
+    color_col = f'color_freq_1_hex' if ranking == 'frequency' else 'color_visual_1_hex'
+
+    # Filter plants that have a dominant color
+    df_with_color = df[df[color_col].notna()].copy()
+
+    # Calculate distance from target color
+    df_with_color['color_distance'] = df_with_color[color_col].apply(
+        lambda x: color_distance(target_hex, x)
+    )
+
+    # Filter by max distance and sort
+    result = df_with_color[df_with_color['color_distance'] <= max_distance].copy()
+    result = result.sort_values('color_distance')
+
+    if limit:
+        result = result.head(limit)
+
+    return result

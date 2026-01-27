@@ -16,110 +16,113 @@ st.set_page_config(page_title="Visual Clusters", page_icon="🔍", layout="wide"
 st.title("🔍 Visual Clusters")
 
 st.markdown("""
-Explore plants grouped by visual similarity using deep learning embeddings.
-Different models capture different aspects of plant appearance.
+Plants grouped by visual similarity using DINOv2 deep learning. Browse through clusters to discover plants that look alike.
 """)
 
-# Sidebar controls
-st.sidebar.header("Settings")
-
-# Model selection
-model_options = {
-    'DINOv2 (Vision Transformer)': 'dinov2',
-    'CLIP (Vision-Language)': 'clip',
-    'PlantNet (Botanical)': 'plantnet',
-    'Combined (All models)': 'combined'
-}
-
-selected_model_name = st.sidebar.selectbox("Embedding Model", list(model_options.keys()))
-selected_model = model_options[selected_model_name]
-
 # Get cluster statistics
+selected_model = 'dinov2'
 cluster_stats = data_loader.get_cluster_stats(selected_model)
 
 if not cluster_stats:
-    st.error(f"No cluster data available for {selected_model_name}")
+    st.error(f"No cluster data available for DINOv2")
     st.stop()
 
-# Cluster selection
+# All Clusters Overview
+st.header("All Clusters")
+
 cluster_ids = sorted(cluster_stats.keys())
-cluster_options = {f"Cluster {cid} ({cluster_stats[cid]} plants)": cid for cid in cluster_ids}
+cluster_cols = st.columns(min(len(cluster_ids), 8))
 
-selected_cluster_name = st.sidebar.selectbox("Cluster", list(cluster_options.keys()))
-selected_cluster_id = cluster_options[selected_cluster_name]
+for idx, cluster_id in enumerate(cluster_ids):
+    col_idx = idx % len(cluster_cols)
+    with cluster_cols[col_idx]:
+        if st.button(
+            f"**{cluster_id}**\n{cluster_stats[cluster_id]} plants",
+            key=f"cluster_{cluster_id}",
+            use_container_width=True
+        ):
+            st.session_state.selected_cluster_id = cluster_id
+            st.rerun()
 
-# Display model info
-st.header(f"Model: {selected_model_name}")
+st.markdown("---")
 
-model_descriptions = {
-    'dinov2': "Self-supervised Vision Transformer trained on images. Captures general visual patterns.",
-    'clip': "Vision-Language model from OpenAI. Understands semantic concepts and image-text relationships.",
-    'plantnet': "Botanical specialist pretrained on plant species. Leverages domain-specific knowledge.",
-    'combined': "Concatenation of all three embeddings. Best overall clustering performance."
-}
+# Cluster selection
+if 'selected_cluster_id' not in st.session_state:
+    st.session_state.selected_cluster_id = cluster_ids[0]
 
-st.info(model_descriptions.get(selected_model, ""))
+selected_cluster_id = st.session_state.selected_cluster_id
 
-# Display cluster summary
-st.header(f"Cluster {selected_cluster_id} Summary")
+# Display cluster
+st.header(f"Cluster {selected_cluster_id}")
 
 filtered_df = data_loader.get_plants_by_cluster(selected_model, selected_cluster_id)
 
-col1, col2, col3 = st.columns(3)
+st.caption(f"{len(filtered_df)} plants in this cluster")
 
-col1.metric("Plants in Cluster", len(filtered_df))
+# Display options
+col1, col2, col3 = st.columns([2, 2, 1])
 
-# Taxonomic composition
-if 'family' in filtered_df.columns:
-    family_counts = filtered_df['family'].value_counts()
-    if len(family_counts) > 0:
-        dominant_family = family_counts.index[0]
-        dominant_count = family_counts.iloc[0]
-        col2.metric("Dominant Family", dominant_family)
-        col3.metric("Taxonomic Purity", f"{(dominant_count / len(filtered_df) * 100):.1f}%")
+with col1:
+    color_ranking = st.radio(
+        "Color Ranking",
+        options=["frequency", "visual"],
+        format_func=lambda x: "By Area" if x == "frequency" else "Visual Importance",
+        horizontal=True
+    )
 
-# Taxonomic breakdown
-if 'family' in filtered_df.columns:
-    st.subheader("Taxonomic Composition")
+with col2:
+    num_colors = st.slider("Colors shown", 3, 5, 5)
 
-    family_counts = filtered_df['family'].value_counts().head(10)
-
-    if len(family_counts) > 0:
-        fig = charts.create_bar_chart(
-            family_counts,
-            "Family",
-            "Count",
-            f"Top Families in Cluster {selected_cluster_id}"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-# Display plants grid
-st.subheader("Plants in this Cluster")
-
-# Color ranking toggle
-color_ranking = st.radio(
-    "Color Ranking",
-    options=["frequency", "visual"],
-    format_func=lambda x: "Frequency" if x == "frequency" else "Visual Importance",
-    horizontal=True
-)
+with col3:
+    plants_per_page = st.selectbox("Per page", [20, 40, 60], index=1)
 
 # Pagination
-plants_per_page = 20
-total_pages = (len(filtered_df) + plants_per_page - 1) // plants_per_page
+total_pages = max(1, (len(filtered_df) + plants_per_page - 1) // plants_per_page)
 
-page = st.selectbox(
-    "Page",
-    range(1, total_pages + 1),
-    format_func=lambda x: f"Page {x} of {total_pages}"
-)
+# Initialize page in session state
+if 'cluster_page' not in st.session_state:
+    st.session_state.cluster_page = 1
+
+# Reset page if cluster changed
+if st.session_state.cluster_page > total_pages:
+    st.session_state.cluster_page = 1
+
+# Pagination controls
+col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+
+with col1:
+    if st.button("⏮️ First", disabled=st.session_state.cluster_page == 1, use_container_width=True):
+        st.session_state.cluster_page = 1
+        st.rerun()
+
+with col2:
+    if st.button("◀️ Prev", disabled=st.session_state.cluster_page == 1, use_container_width=True):
+        st.session_state.cluster_page -= 1
+        st.rerun()
+
+with col3:
+    st.markdown(f"<div style='text-align: center; padding: 8px;'>Page <strong>{st.session_state.cluster_page}</strong> of <strong>{total_pages}</strong></div>", unsafe_allow_html=True)
+
+with col4:
+    if st.button("Next ▶️", disabled=st.session_state.cluster_page >= total_pages, use_container_width=True):
+        st.session_state.cluster_page += 1
+        st.rerun()
+
+with col5:
+    if st.button("Last ⏭️", disabled=st.session_state.cluster_page >= total_pages, use_container_width=True):
+        st.session_state.cluster_page = total_pages
+        st.rerun()
+
+page = st.session_state.cluster_page
 
 start_idx = (page - 1) * plants_per_page
-end_idx = start_idx + plants_per_page
+end_idx = min(start_idx + plants_per_page, len(filtered_df))
 page_df = filtered_df.iloc[start_idx:end_idx]
 
+st.caption(f"Showing {start_idx + 1}-{end_idx} of {len(filtered_df)}")
+
 # Display plants in grid
-cols_per_row = 4
+cols_per_row = 5
 rows = (len(page_df) + cols_per_row - 1) // cols_per_row
 
 for row_idx in range(rows):
@@ -139,40 +142,25 @@ for row_idx in range(rows):
             # Display thumbnail
             if thumbnail_path.exists():
                 st.image(str(thumbnail_path), use_container_width=True)
-            else:
-                st.warning("Thumbnail not found")
 
-            # Plant info
-            st.caption(f"**{plant_id}**")
+            # Plant name (shortened)
+            display_name = plant_id.replace('KW_T_423_', '')
+            st.caption(f"**{display_name}**")
 
-            if not pd.isna(plant.get('family')):
-                st.caption(f"Family: {plant['family']}")
+            # Dutch name
+            if not pd.isna(plant.get('Huidige Nederlandse naam')):
+                st.caption(plant['Huidige Nederlandse naam'])
+
+            # Genus
             if not pd.isna(plant.get('genus')):
-                st.caption(f"Genus: {plant['genus']}")
+                st.caption(f"*{plant['genus']}*")
 
             # Color palette
             colors = data_loader.get_color_palette(plant_id, ranking=color_ranking)
             if colors:
-                st.markdown(charts.create_color_palette_display(colors[:3]), unsafe_allow_html=True)
+                st.markdown(charts.create_color_palette_display(colors[:num_colors]), unsafe_allow_html=True)
 
             # Link to detail page
-            if st.button("View Details", key=f"detail_{plant_id}"):
+            if st.button("Details", key=f"detail_{plant_id}", use_container_width=True):
                 st.session_state.selected_plant_id = plant_id
                 st.switch_page("pages/4_Plant_Detail.py")
-
-# Cluster statistics
-st.subheader("All Clusters Overview")
-
-st.markdown(f"**Total clusters in {selected_model_name}:** {len(cluster_stats)}")
-
-# Show cluster sizes
-cluster_size_df = pd.DataFrame(list(cluster_stats.items()), columns=['Cluster', 'Size'])
-cluster_size_df = cluster_size_df.sort_values('Size', ascending=False)
-
-fig = charts.create_bar_chart(
-    dict(zip(cluster_size_df['Cluster'], cluster_size_df['Size'])),
-    "Cluster",
-    "Number of Plants",
-    f"Cluster Sizes ({selected_model_name})"
-)
-st.plotly_chart(fig, use_container_width=True)

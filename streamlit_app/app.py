@@ -32,36 +32,40 @@ historical botanical illustrations through multiple lenses:
 Use the sidebar to navigate between different views.
 """)
 
-with st.expander("ℹ️ How is visual importance calculated?"):
+with st.expander("ℹ️ How are colors ranked?"):
     st.markdown("""
-    The app shows two color rankings for each plant:
+    The app provides **three different color rankings** for each plant:
 
-    1. **Frequency Ranking**: Colors sorted by area coverage (most common first)
-    2. **Visual Importance Ranking**: Colors weighted by perceptual distinctiveness and spatial salience
+    ### 1. Frequency Ranking
+    Colors sorted by **area coverage** (most common first).
+    - Uses: Understanding overall color composition
+    - Best for: Finding plants with lots of green, identifying background colors
 
-    ### Visual Importance Score
-
-    This combines two complementary methods:
-
-    **1. Perceptual Weight (40%)** - A heuristic based on color properties:
-    - Frequency: How much area the color covers
-    - Saturation: How vivid/pure the color is
-    - Contrast: How different from other colors in the palette
+    ### 2. Perceptual Ranking
+    Colors ranked by **perceptual distinctiveness** - a heuristic combining:
+    - Frequency (40%): How much area the color covers
+    - Saturation (30%): How vivid/pure the color is
+    - Contrast (30%): How different from other colors in the palette
     - Formula: `0.4×frequency + 0.3×saturation + 0.3×contrast`
+    - Uses: Finding colors that "pop" due to their inherent properties
+    - Best for: Identifying vibrant or unusual colors regardless of location
 
-    **2. Spatial Salience (60%)** - True visual attention analysis:
-    - Uses Spectral Residual method (or edge-based fallback)
-    - Detects regions that naturally draw eye attention
-    - Weights colors by their overlap with high-salience areas
+    ### 3. Salience Ranking
+    Colors ranked by **spatial attention** - true visual salience using:
+    - Spectral Residual method (or edge-based fallback)
+    - Analyzes image frequencies to detect unexpected/salient regions
+    - Weights colors by overlap with high-attention areas
+    - Uses: Finding colors that naturally draw the eye
+    - Best for: Identifying diagnostic features the illustrator emphasized (flowers, fruits)
 
-    **Combined**: `importance = 0.6×saliency + 0.4×perceptual`
+    ### Which to Use?
 
-    ### Why This Matters
+    - **Frequency**: "What colors make up most of this plant?"
+    - **Perceptual**: "What colors are intrinsically striking?"
+    - **Salience**: "What colors would I notice first when looking at this?"
 
-    A small but bright red flower center in a high-salience region will rank higher than
-    large but dull grayish-green leaves in low-attention areas. This helps identify
-    botanically distinctive features like vibrant flowers, colorful berries, or striking
-    foliage patterns that would naturally catch a viewer's eye.
+    For botanical analysis, **salience** often works best as it captures what the
+    illustrator emphasized - typically the diagnostic features like flowers or fruits.
     """)
 
 # Load data

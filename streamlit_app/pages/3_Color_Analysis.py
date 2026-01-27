@@ -1,5 +1,5 @@
 """
-Color Analysis page - analyze color patterns and relationships
+Browse by Color - explore plants grouped by dominant colors
 """
 import streamlit as st
 import pandas as pd
@@ -10,235 +10,200 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from utils import data_loader, charts
+from utils.color_utils import COLOR_BUCKETS, get_color_bucket_info
 
-st.set_page_config(page_title="Color Analysis", page_icon="🎨", layout="wide")
+st.set_page_config(page_title="Browse by Color", page_icon="🎨", layout="wide")
 
-st.title("🎨 Color Analysis")
+st.title("🎨 Browse by Color")
 
 st.markdown("""
-Analyze color patterns across the collection and explore relationships between
-colors, taxonomy, and visual clusters.
+Pick any color and find plants with similar dominant colors.
 """)
 
-# Load comparison metrics
-try:
-    metrics = data_loader.load_comparison_metrics()
-except:
-    metrics = {}
+# Color picker section
+st.header("Pick a Color")
 
-# Tabs for different analyses
-tab1, tab2, tab3 = st.tabs([
-    "Taxonomy vs Clusters",
-    "Surprising Plants",
-    "Statistics"
-])
+col1, col2 = st.columns([1, 4])
 
-with tab1:
-    st.header("Taxonomy vs Cluster Comparison")
+with col1:
+    # Initialize selected color in session state
+    if 'custom_color' not in st.session_state:
+        st.session_state.custom_color = '#4CAF50'  # Default green
 
-    st.markdown("""
-    Compare how taxonomic classification (family/genus) aligns with visual clustering.
-    High agreement suggests visual similarity correlates with evolutionary relationships.
-    """)
+    # Color picker
+    selected_color = st.color_picker("Choose color", st.session_state.custom_color, key="color_picker_main")
 
-    # Model selection
-    model_options = {
-        'DINOv2': 'dinov2',
-        'CLIP': 'clip',
-        'PlantNet': 'plantnet',
-        'Combined': 'combined'
-    }
+    if selected_color != st.session_state.custom_color:
+        st.session_state.custom_color = selected_color
+        st.session_state.color_page = 1  # Reset pagination
+        st.rerun()
 
-    selected_model_name = st.selectbox("Embedding Model", list(model_options.keys()))
-    selected_model = model_options[selected_model_name]
+    # Show large color swatch
+    swatch_html = f"""
+    <div style="
+        width: 100%;
+        height: 120px;
+        background: {selected_color};
+        border: 2px solid #ccc;
+        border-radius: 8px;
+        margin-top: 10px;
+    "></div>
+    """
+    st.markdown(swatch_html, unsafe_allow_html=True)
 
-    if selected_model in metrics:
-        model_metrics = metrics[selected_model]
+with col2:
+    st.header("Settings")
 
-        # Display agreement scores
-        st.subheader("Agreement Scores")
+    col2a, col2b = st.columns(2)
 
-        col1, col2 = st.columns(2)
-
-        ari = model_metrics.get('adjusted_rand_index', 0)
-        nmi = model_metrics.get('normalized_mutual_info', 0)
-
-        col1.metric(
-            "Adjusted Rand Index",
-            f"{ari:.3f}",
-            help="Measures similarity between two clusterings (0=random, 1=perfect agreement)"
-        )
-        col2.metric(
-            "Normalized Mutual Information",
-            f"{nmi:.3f}",
-            help="Measures mutual dependence between clusterings (0=independent, 1=perfect)"
+    with col2a:
+        # Color ranking selection
+        color_ranking = st.radio(
+            "Color Ranking Method",
+            options=["frequency", "visual"],
+            format_func=lambda x: "By Area" if x == "frequency" else "Visual Importance",
+            help="Frequency ranks by pixel area, Visual Importance uses perceptual weighting"
         )
 
-        # Contingency heatmap
-        if 'contingency_matrix' in model_metrics:
-            st.subheader("Family × Cluster Contingency Matrix")
+    with col2b:
+        # Similarity threshold slider (inverted so higher = more similar)
+        similarity = st.slider(
+            "Color similarity",
+            min_value=0,
+            max_value=100,
+            value=70,
+            help="Higher = include more plants with similar colors. Lower = only very close matches."
+        )
+        # Convert to distance (invert the scale)
+        max_distance = 100 - similarity
 
-            st.markdown("""
-            Shows how many plants from each family fall into each cluster.
-            Diagonal patterns suggest alignment between taxonomy and visual similarity.
-            """)
+st.markdown("---")
 
-            contingency = model_metrics['contingency_matrix']
+# Get plants by color similarity
+filtered_df = data_loader.get_plants_by_color_similarity(
+    selected_color,
+    ranking=color_ranking,
+    max_distance=max_distance
+)
 
-            if contingency:
-                fig = charts.create_contingency_heatmap(
-                    contingency,
-                    f"Family × Cluster ({selected_model_name})"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+st.subheader(f"Found {len(filtered_df)} plants with similar colors")
 
-        # Purity scores
-        col1, col2 = st.columns(2)
+# Display options
+col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
 
-        with col1:
-            st.subheader("Cluster Purity")
-            st.markdown("Percentage of dominant family in each cluster")
+with col1:
+    show_palette = st.checkbox("Show color palettes", value=True)
 
-            if 'cluster_purity' in model_metrics:
-                purity_data = model_metrics['cluster_purity']
-                purity_df = pd.DataFrame(
-                    list(purity_data.items()),
-                    columns=['Cluster', 'Purity']
-                )
-                purity_df['Purity'] = purity_df['Purity'] * 100
-                purity_df = purity_df.sort_values('Purity', ascending=False)
-
-                st.dataframe(
-                    purity_df.style.format({'Purity': '{:.1f}%'}),
-                    use_container_width=True,
-                    height=300
-                )
-
-        with col2:
-            st.subheader("Family Concentration")
-            st.markdown("Percentage of family in its dominant cluster")
-
-            if 'family_concentration' in model_metrics:
-                conc_data = model_metrics['family_concentration']
-                conc_df = pd.DataFrame(
-                    list(conc_data.items()),
-                    columns=['Family', 'Concentration']
-                )
-                conc_df['Concentration'] = conc_df['Concentration'] * 100
-                conc_df = conc_df.sort_values('Concentration', ascending=False)
-
-                st.dataframe(
-                    conc_df.style.format({'Concentration': '{:.1f}%'}),
-                    use_container_width=True,
-                    height=300
-                )
-
+with col2:
+    if show_palette:
+        num_colors = st.slider("Colors shown", 1, 5, 5)
     else:
-        st.warning(f"No comparison metrics available for {selected_model_name}")
+        num_colors = 5
 
-with tab2:
-    st.header("Surprising Plants")
-
-    st.markdown("""
-    Plants that break expected patterns - visually similar but taxonomically distant,
-    or vice versa. These are interesting edge cases for research.
-    """)
-
-    # Model selection
-    selected_model_name2 = st.selectbox(
-        "Embedding Model",
-        list(model_options.keys()),
-        key='surprising_model'
-    )
-    selected_model2 = model_options[selected_model_name2]
-
-    if selected_model2 in metrics and 'surprising_plants' in metrics[selected_model2]:
-        surprising = metrics[selected_model2]['surprising_plants']
-
-        if surprising:
-            st.subheader(f"Plants in minority families within their cluster ({selected_model_name2})")
-
-            surprising_df = pd.DataFrame(surprising)
-            st.dataframe(
-                surprising_df,
-                use_container_width=True,
-                column_config={
-                    'plant_id': 'Plant ID',
-                    'family': 'Plant Family',
-                    'cluster': 'Cluster',
-                    'dominant_family': 'Cluster\'s Dominant Family',
-                    'cluster_size': 'Cluster Size'
-                }
-            )
-
-            # Display thumbnails of first few surprising plants
-            st.subheader("Examples")
-
-            cols = st.columns(5)
-
-            for idx, (col, row) in enumerate(zip(cols, surprising_df.head(5).itertuples())):
-                with col:
-                    plant_id = row.plant_id
-                    thumbnail_path = data_loader.get_thumbnail_path(plant_id)
-
-                    if thumbnail_path.exists():
-                        st.image(str(thumbnail_path), use_container_width=True)
-                    st.caption(f"**{plant_id}**")
-                    st.caption(f"Family: {row.family}")
-                    st.caption(f"In cluster dominated by {row.dominant_family}")
-
-        else:
-            st.info(f"No surprising plants identified for {selected_model_name2}")
-    else:
-        st.warning(f"No surprising plants data available for {selected_model_name2}")
-
-with tab3:
-    st.header("Dataset Statistics")
-
-    # Overall stats
-    plants_df = data_loader.load_plants_metadata()
-
-    st.subheader("Taxonomy Coverage")
-
-    col1, col2, col3 = st.columns(3)
-
-    total_plants = len(plants_df)
-    with_family = plants_df['family'].notna().sum()
-    with_genus = plants_df['genus'].notna().sum()
-
-    col1.metric("Total Plants", f"{total_plants:,}")
-    col2.metric("With Family", f"{with_family:,} ({with_family/total_plants*100:.1f}%)")
-    col3.metric("With Genus", f"{with_genus:,} ({with_genus/total_plants*100:.1f}%)")
-
-    # Family distribution
-    st.subheader("Top Families by Size")
-
-    family_counts = plants_df['family'].value_counts().head(15)
-
-    fig = charts.create_bar_chart(
-        family_counts,
-        "Family",
-        "Number of Plants",
-        "Top 15 Families"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Cluster sizes across models
-    st.subheader("Cluster Counts by Model")
-
-    clusters_df = data_loader.load_cluster_assignments()
-
-    cluster_counts = {}
-    for model in ['dinov2', 'clip', 'plantnet', 'combined']:
-        if model in clusters_df.columns:
-            n_clusters = clusters_df[clusters_df[model] >= 0][model].nunique()
-            cluster_counts[model.upper()] = n_clusters
-
-    if cluster_counts:
-        fig = charts.create_bar_chart(
-            cluster_counts,
-            "Model",
-            "Number of Clusters",
-            "Clusters Detected by Each Model"
+with col3:
+    if show_palette:
+        palette_style = st.radio(
+            "Palette style",
+            options=["squares", "circles", "bar"],
+            horizontal=True,
+            label_visibility="collapsed"
         )
-        st.plotly_chart(fig, use_container_width=True)
+    else:
+        palette_style = "squares"
+
+with col4:
+    plants_per_page = st.selectbox("Per page", [20, 40, 60], index=1)
+
+# Pagination
+total_pages = max(1, (len(filtered_df) + plants_per_page - 1) // plants_per_page)
+
+# Initialize page in session state
+if 'color_page' not in st.session_state:
+    st.session_state.color_page = 1
+
+# Reset page if color bucket changed and page is out of bounds
+if st.session_state.color_page > total_pages:
+    st.session_state.color_page = 1
+
+# Pagination controls
+col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+
+with col1:
+    if st.button("⏮️ First", disabled=st.session_state.color_page == 1, use_container_width=True):
+        st.session_state.color_page = 1
+        st.rerun()
+
+with col2:
+    if st.button("◀️ Prev", disabled=st.session_state.color_page == 1, use_container_width=True):
+        st.session_state.color_page -= 1
+        st.rerun()
+
+with col3:
+    st.markdown(f"<div style='text-align: center; padding: 8px;'>Page <strong>{st.session_state.color_page}</strong> of <strong>{total_pages}</strong></div>", unsafe_allow_html=True)
+
+with col4:
+    if st.button("Next ▶️", disabled=st.session_state.color_page >= total_pages, use_container_width=True):
+        st.session_state.color_page += 1
+        st.rerun()
+
+with col5:
+    if st.button("Last ⏭️", disabled=st.session_state.color_page >= total_pages, use_container_width=True):
+        st.session_state.color_page = total_pages
+        st.rerun()
+
+page = st.session_state.color_page
+start_idx = (page - 1) * plants_per_page
+end_idx = min(start_idx + plants_per_page, len(filtered_df))
+page_df = filtered_df.iloc[start_idx:end_idx]
+
+st.caption(f"Showing {start_idx + 1}-{end_idx} of {len(filtered_df)}")
+
+# Display plants in grid
+cols_per_row = 5
+rows = (len(page_df) + cols_per_row - 1) // cols_per_row
+
+for row_idx in range(rows):
+    cols = st.columns(cols_per_row)
+
+    for col_idx in range(cols_per_row):
+        plant_idx = row_idx * cols_per_row + col_idx
+
+        if plant_idx >= len(page_df):
+            break
+
+        plant = page_df.iloc[plant_idx]
+        plant_id = plant['plant_id']
+        thumbnail_path = data_loader.get_thumbnail_path(plant_id)
+
+        with cols[col_idx]:
+            # Display thumbnail
+            if thumbnail_path.exists():
+                st.image(str(thumbnail_path), use_container_width=True)
+
+            # Plant name (shortened)
+            display_name = plant_id.replace('KW_T_423_', '')
+            st.caption(f"**{display_name}**")
+
+            # Dutch name
+            if not pd.isna(plant.get('Huidige Nederlandse naam')):
+                st.caption(plant['Huidige Nederlandse naam'])
+
+            # Genus
+            if not pd.isna(plant.get('genus')):
+                st.caption(f"*{plant['genus']}*")
+
+            # Color palette
+            if show_palette:
+                colors = data_loader.get_color_palette(plant_id, ranking=color_ranking)
+                if colors:
+                    if palette_style == "circles":
+                        st.markdown(charts.create_color_palette_circles(colors[:num_colors]), unsafe_allow_html=True)
+                    elif palette_style == "bar":
+                        st.markdown(charts.create_color_palette_bar(colors[:num_colors]), unsafe_allow_html=True)
+                    else:
+                        st.markdown(charts.create_color_palette_display(colors[:num_colors]), unsafe_allow_html=True)
+
+            # Link to detail page
+            if st.button("Details", key=f"detail_{plant_id}", use_container_width=True):
+                st.session_state.selected_plant_id = plant_id
+                st.switch_page("pages/4_Plant_Detail.py")

@@ -46,23 +46,115 @@ def create_color_palette_display(colors):
     Returns:
         HTML string for the palette
     """
-    html_parts = ['<div style="display: flex; gap: 5px; align-items: center;">']
+    if not colors:
+        return ""
 
+    swatches = []
     for color in colors:
-        hex_code = color['hex']
-        percentage = color['percentage']
+        hex_code = color.get('hex', '')
+        percentage = color.get('percentage', 0)
 
-        swatch_html = f'''
-        <div style="display: inline-block; text-align: center;">
-            <div style="width: 50px; height: 50px; background-color: {hex_code}; border: 1px solid #ccc; border-radius: 3px;"></div>
-            <div style="font-size: 10px; margin-top: 2px;">{hex_code}</div>
-            <div style="font-size: 9px; color: #666;">{percentage:.1f}%</div>
-        </div>
-        '''
-        html_parts.append(swatch_html)
+        # Skip invalid entries
+        if not hex_code or str(hex_code) == 'nan':
+            continue
 
-    html_parts.append('</div>')
-    return ''.join(html_parts)
+        try:
+            pct_str = f"{float(percentage):.1f}%"
+        except (ValueError, TypeError):
+            pct_str = ""
+
+        swatches.append(
+            f'<div style="text-align:center;flex:0 0 auto;">'
+            f'<div style="width:32px;height:32px;background:{hex_code};border:1px solid #ccc;border-radius:4px;"></div>'
+            f'<div style="font-size:9px;margin-top:3px;line-height:1;white-space:nowrap;">{pct_str}</div>'
+            f'</div>'
+        )
+
+    if not swatches:
+        return ""
+
+    return f'<div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:2px;max-width:100%;">{"".join(swatches)}</div>'
+
+def create_color_palette_circles(colors):
+    """
+    Create HTML for displaying a color palette as circles.
+
+    Args:
+        colors: List of dicts with 'hex' and 'percentage' keys
+
+    Returns:
+        HTML string for the palette
+    """
+    if not colors:
+        return ""
+
+    swatches = []
+    for color in colors:
+        hex_code = color.get('hex', '')
+        percentage = color.get('percentage', 0)
+
+        # Skip invalid entries
+        if not hex_code or str(hex_code) == 'nan':
+            continue
+
+        try:
+            pct_str = f"{float(percentage):.1f}%"
+        except (ValueError, TypeError):
+            pct_str = ""
+
+        swatches.append(
+            f'<div style="text-align:center;flex:0 0 auto;">'
+            f'<div style="width:32px;height:32px;background:{hex_code};border:1px solid #ccc;border-radius:50%;"></div>'
+            f'<div style="font-size:9px;margin-top:3px;line-height:1;white-space:nowrap;">{pct_str}</div>'
+            f'</div>'
+        )
+
+    if not swatches:
+        return ""
+
+    return f'<div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:2px;max-width:100%;">{"".join(swatches)}</div>'
+
+def create_color_palette_bar(colors):
+    """
+    Create HTML for displaying a color palette as a horizontal bar.
+
+    Args:
+        colors: List of dicts with 'hex' and 'percentage' keys
+
+    Returns:
+        HTML string for the palette
+    """
+    if not colors:
+        return ""
+
+    # Calculate total percentage for proportional sizing
+    total_pct = sum(float(c.get('percentage', 0)) for c in colors if c.get('hex') and str(c.get('hex')) != 'nan')
+
+    if total_pct == 0:
+        return ""
+
+    segments = []
+    for color in colors:
+        hex_code = color.get('hex', '')
+        percentage = color.get('percentage', 0)
+
+        # Skip invalid entries
+        if not hex_code or str(hex_code) == 'nan':
+            continue
+
+        try:
+            pct = float(percentage)
+            width_pct = (pct / total_pct) * 100 if total_pct > 0 else 0
+            segments.append(
+                f'<div style="flex:{width_pct};background:{hex_code};height:20px;" title="{pct:.1f}%"></div>'
+            )
+        except (ValueError, TypeError):
+            continue
+
+    if not segments:
+        return ""
+
+    return f'<div style="display:flex;width:100%;border:1px solid #ccc;border-radius:4px;overflow:hidden;">{"".join(segments)}</div>'
 
 def create_cluster_distribution_pie(df, cluster_column, title="Cluster Distribution"):
     """
