@@ -5,6 +5,8 @@ A Streamlit app for exploring botanical illustrations from the Flora Batava coll
 through taxonomy, visual clusters, and color analysis.
 """
 import streamlit as st
+import random
+import pandas as pd
 from utils import data_loader
 
 # Page configuration
@@ -20,24 +22,90 @@ st.title("🌿 Flora Batava Plant Explorer")
 
 st.markdown("""
 Welcome to the Flora Batava Plant Explorer! This interactive application allows you to explore
-2,241 historical botanical illustrations through multiple lenses:
+historical botanical illustrations through multiple lenses:
 
 - **Browse by Taxonomy**: Navigate through plant families, genera, and species
-- **Visual Clusters**: Explore AI-discovered similarity groups using DINOv2, CLIP, and PlantNet
+- **Visual Clusters**: Explore AI-discovered similarity groups using DINOv2
 - **Color Analysis**: Analyze color patterns and their relationships to taxonomy and clusters
 - **Plant Details**: Deep dive into individual plants with colors, clusters, and related specimens
 
 Use the sidebar to navigate between different views.
 """)
 
+# Load data
+plants_df = data_loader.load_plants_metadata()
+clusters_df = data_loader.load_cluster_assignments()
+
+# Hero search section
+st.markdown("---")
+st.markdown("### Start Exploring")
+
+search_col, button_col = st.columns([3, 1])
+
+with search_col:
+    search_query = st.text_input(
+        "Search for a plant",
+        "",
+        placeholder="Search by plant ID or name...",
+        label_visibility="collapsed"
+    )
+
+with button_col:
+    random_button = st.button("🎲 Random Plant", type="primary", use_container_width=True)
+
+# Handle search query
+if search_query:
+    query_lower = search_query.lower()
+    matches = plants_df[
+        plants_df['plant_id'].str.lower().str.contains(query_lower) |
+        plants_df['Huidige Nederlandse naam'].fillna('').str.lower().str.contains(query_lower)
+    ]
+
+    if len(matches) > 0:
+        # Limit to 15 matches
+        display_matches = matches.head(15)
+
+        # Create display options
+        display_options = []
+        for _, plant in display_matches.iterrows():
+            plant_id = plant['plant_id']
+            dutch_name = plant.get('Huidige Nederlandse naam', '')
+            if pd.notna(dutch_name) and dutch_name:
+                display_options.append(f"{plant_id} - {dutch_name}")
+            else:
+                display_options.append(plant_id)
+
+        # Show match count if limited
+        label = f"Found {len(matches)} plants"
+        if len(matches) > 15:
+            label = f"Showing 15 of {len(matches)} matches - keep typing to narrow"
+
+        selected_display = st.selectbox(
+            label,
+            display_options,
+            key="home_search_select"
+        )
+
+        if st.button("Go to plant", type="primary"):
+            # Extract plant_id from display string
+            selected_id = selected_display.split(' - ')[0]
+            st.session_state.selected_plant_id = selected_id
+            st.switch_page("pages/4_Plant_Detail.py")
+    else:
+        st.warning("No plants found")
+
+# Handle random plant button
+if random_button:
+    plant_options = plants_df['plant_id'].tolist()
+    st.session_state.selected_plant_id = random.choice(plant_options)
+    st.switch_page("pages/4_Plant_Detail.py")
+
+st.markdown("---")
+
 # Load and display summary statistics
 st.header("Dataset Overview")
 
 col1, col2, col3, col4 = st.columns(4)
-
-# Load data
-plants_df = data_loader.load_plants_metadata()
-clusters_df = data_loader.load_cluster_assignments()
 
 # Statistics
 total_plants = len(plants_df)
@@ -50,22 +118,12 @@ col2.metric("With Taxonomy", f"{plants_with_taxonomy:,}")
 col3.metric("Families", f"{n_families}")
 col4.metric("Genera", f"{n_genera}")
 
-# Clustering models info
-st.header("Clustering Models")
+# Clustering info
+st.header("Visual Clustering")
 
-col1, col2, col3, col4 = st.columns(4)
-
-models = {
-    'DINOv2': 'dinov2',
-    'CLIP': 'clip',
-    'PlantNet': 'plantnet',
-    'Combined': 'combined'
-}
-
-for col, (name, model_col) in zip([col1, col2, col3, col4], models.items()):
-    if model_col in clusters_df.columns:
-        n_clusters = clusters_df[clusters_df[model_col] >= 0][model_col].nunique()
-        col.metric(name, f"{n_clusters} clusters")
+if 'dinov2' in clusters_df.columns:
+    n_clusters = clusters_df[clusters_df['dinov2'] >= 0]['dinov2'].nunique()
+    st.metric("DINOv2 Clusters", f"{n_clusters} clusters")
 
 st.markdown("""
 ---
@@ -84,7 +142,7 @@ Use the **sidebar** to navigate to different pages:
 - Source: Flora Batava historical botanical illustration collection
 - Segmentation: Meta's Segment Anything Model (SAM)
 - Color Analysis: K-means clustering in perceptually uniform LAB color space
-- Embeddings: DINOv2 (Vision Transformer), CLIP (Vision-Language), PlantNet (Botanical)
+- Embeddings: DINOv2 Vision Transformer for visual similarity clustering
 """)
 
 # Sidebar info

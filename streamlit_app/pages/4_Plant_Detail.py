@@ -13,17 +13,12 @@ from utils import data_loader, charts
 
 st.set_page_config(page_title="Plant Detail", page_icon="🌱", layout="wide")
 
-# Get plant_id from session state or URL parameter
-plant_id = None
-
-if 'selected_plant_id' in st.session_state:
-    plant_id = st.session_state.selected_plant_id
-else:
-    # Allow manual input
-    plant_id = st.text_input("Enter Plant ID", "")
+# Get plant_id from session state
+plant_id = st.session_state.get('selected_plant_id', None)
 
 if not plant_id:
-    st.warning("No plant selected. Navigate from another page or enter a Plant ID above.")
+    st.title("🌱 Plant Detail")
+    st.info("Use the home page to search for a plant, or navigate here from another page.")
     st.stop()
 
 # Load plant details
@@ -33,8 +28,13 @@ if not plant:
     st.error(f"Plant {plant_id} not found")
     st.stop()
 
-# Display plant
-st.title(f"🌱 {plant_id}")
+# Display plant with Dutch name
+dutch_name = plant.get('Huidige Nederlandse naam')
+if not pd.isna(dutch_name) and dutch_name:
+    st.title(f"🌱 {dutch_name}")
+    st.caption(f"Plant ID: {plant_id}")
+else:
+    st.title(f"🌱 {plant_id}")
 
 # Main layout
 col1, col2 = st.columns([2, 1])
@@ -94,25 +94,14 @@ with col2:
 # Cluster membership
 st.header("Visual Cluster Membership")
 
-col1, col2, col3, col4 = st.columns(4)
-
-models = [
-    ('DINOv2', 'dinov2', col1),
-    ('CLIP', 'clip', col2),
-    ('PlantNet', 'plantnet', col3),
-    ('Combined', 'combined', col4)
-]
-
-for model_name, model_col, col in models:
-    with col:
-        if model_col in plant and not pd.isna(plant[model_col]):
-            cluster_id = int(plant[model_col])
-            if cluster_id >= 0:
-                st.metric(model_name, f"Cluster {cluster_id}")
-            else:
-                st.metric(model_name, "Noise")
-        else:
-            st.metric(model_name, "N/A")
+if 'dinov2' in plant and not pd.isna(plant['dinov2']):
+    cluster_id = int(plant['dinov2'])
+    if cluster_id >= 0:
+        st.metric("DINOv2 Cluster", f"Cluster {cluster_id}")
+    else:
+        st.info("This plant was classified as noise (doesn't fit into any cluster)")
+else:
+    st.info("No cluster assignment available")
 
 # Similar plants
 st.header("Visually Similar Plants")
