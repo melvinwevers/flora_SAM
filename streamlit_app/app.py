@@ -32,6 +32,29 @@ historical botanical illustrations through multiple lenses:
 Use the sidebar to navigate between different views.
 """)
 
+with st.expander("ℹ️ How is visual salience calculated?"):
+    st.markdown("""
+    The app shows two color rankings for each plant:
+
+    1. **Frequency Ranking**: Colors sorted by area coverage (most common first)
+    2. **Visual Importance Ranking**: Colors sorted by visual salience
+
+    **Visual Salience Score** combines three factors to identify colors that catch the eye:
+
+    - **Frequency (40%)**: How much area the color covers
+    - **Saturation (30%)**: How vivid/pure the color is (more saturated = more noticeable)
+    - **Contrast (30%)**: How different the color is from other colors in the image
+
+    **Formula**: `importance = 0.4×frequency + 0.3×saturation + 0.3×contrast`
+
+    This means a small but highly saturated, contrasting color (like a bright red flower center)
+    can rank higher than a large but dull color (like grayish-green leaves).
+
+    **Why this matters**: Visual salience better captures which colors draw human attention,
+    making it useful for finding plants with distinctive color features like bright flowers,
+    vibrant berries, or striking foliage patterns.
+    """)
+
 # Load data
 plants_df = data_loader.load_plants_metadata()
 clusters_df = data_loader.load_cluster_assignments()
