@@ -70,7 +70,7 @@ with st.expander("How are colors ranked?"):
     All colors are provided in three color spaces:
     - **RGB**: Standard red-green-blue (0-255 per channel)
     - **HSL**: Hue (0-360°), Saturation (0-100%), Lightness (0-100%)
-    - **LAB**: CIE L\*a\*b\* perceptually uniform color space
+    - **LAB**: CIE L\\*a\\*b\\* perceptually uniform color space
       - L: Lightness (0-100)
       - a: Green (-) to Red (+) axis
       - b: Blue (-) to Yellow (+) axis
