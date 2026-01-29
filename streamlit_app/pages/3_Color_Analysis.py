@@ -55,16 +55,23 @@ with col2:
         )
 
     with col2b:
-        # Similarity threshold slider (inverted so higher = more similar)
+        # Similarity threshold slider (Delta E scale)
         similarity = st.slider(
-            "Color similarity",
+            "Color similarity (Delta E)",
             min_value=0,
             max_value=100,
-            value=10,
-            help="Higher = include more plants with similar colors. Lower = only very close matches."
+            value=30,
+            help="""Higher = include more colors (larger Delta E threshold)
+
+Delta E Scale:
+- 0-5: Very similar colors (same shade)
+- 5-15: Similar colors (same hue family)
+- 15-30: Somewhat similar (noticeable difference)
+- 30+: Very different colors
+"""
         )
-        # Convert to distance (invert the scale)
-        max_distance = 100 - similarity
+        # Convert to distance (now in Delta E, not RGB!)
+        max_distance = similarity
 
 st.markdown("---")
 

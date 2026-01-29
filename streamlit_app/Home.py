@@ -6,6 +6,7 @@ through taxonomy, visual clusters, and color analysis.
 """
 import streamlit as st
 import pandas as pd
+import random
 from utils import data_loader
 
 # Page configuration
@@ -21,7 +22,69 @@ st.set_page_config(
 
 # Home page
 st.title("🌿 Flora Batava Plant Explorer")
-st.caption("Home")
+
+# Hero search section
+search_col, random_col = st.columns([3, 1])
+
+with search_col:
+    # Load plants for search
+    plants_df = data_loader.load_plants_metadata()
+
+    # Create autocomplete options with mapping
+    autocomplete_options = [""]  # Empty option first
+    option_to_plant_id = {}  # Map display name to plant_id
+
+    for _, row in plants_df.iterrows():
+        plant_id = row['plant_id']
+        dutch_name = row.get('Huidige Nederlandse naam')
+        genus = row.get('genus')
+        species = row.get('species')
+
+        # Build Latin name
+        latin_parts = []
+        if pd.notna(genus):
+            latin_parts.append(genus)
+        if pd.notna(species):
+            latin_parts.append(species)
+        latin_name = " ".join(latin_parts) if latin_parts else None
+
+        # Build display name
+        if pd.notna(dutch_name) and dutch_name:
+            if latin_name:
+                display_name = f"{dutch_name} ({latin_name})"
+            else:
+                display_name = dutch_name
+        elif latin_name:
+            display_name = latin_name
+        else:
+            display_name = f"Plant {plant_id.replace('KW_T_423_', '')}"
+
+        autocomplete_options.append(display_name)
+        option_to_plant_id[display_name] = plant_id
+
+    # Autocomplete search using selectbox
+    selected_plant = st.selectbox(
+        "Search plants",
+        options=autocomplete_options,
+        placeholder="Type to search by name...",
+        label_visibility="collapsed",
+        key="plant_search"
+    )
+
+    # Auto-navigate when plant is selected
+    if selected_plant and selected_plant != "":
+        selected_plant_id = option_to_plant_id[selected_plant]
+        st.session_state.selected_plant_id = selected_plant_id
+        st.switch_page("pages/Plant_Detail.py")
+
+with random_col:
+    st.markdown("<div style='height: 32px;'></div>", unsafe_allow_html=True)  # Align with search input
+    if st.button("🎲 Random Plant", use_container_width=True):
+        random_plant_id = random.choice(plants_df['plant_id'].tolist())
+        st.session_state.selected_plant_id = random_plant_id
+        st.switch_page("pages/Plant_Detail.py")
+
+st.markdown("---")
 
 st.markdown("""
 Welcome to the Flora Batava Plant Explorer! This interactive application allows you to explore
@@ -32,7 +95,7 @@ historical botanical illustrations through multiple lenses:
 - **Color Analysis**: Analyze color patterns and their relationships to taxonomy and clusters
 - **Plant Details**: Deep dive into individual plants with colors, clusters, and related specimens
 
-Use the sidebar to navigate between different views.
+Use the sidebar to navigate between different views, or use the search above to find a specific plant.
 """)
 
 with st.expander("How are colors ranked?"):
@@ -85,11 +148,8 @@ with st.expander("How are colors ranked?"):
     illustrator emphasized - typically the diagnostic features like flowers or fruits.
     """)
 
-# Load data
-plants_df = data_loader.load_plants_metadata()
+# Load cluster data
 clusters_df = data_loader.load_cluster_assignments()
-
-
 
 st.markdown("---")
 

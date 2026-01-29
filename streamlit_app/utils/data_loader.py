@@ -250,22 +250,76 @@ def get_color_bucket_stats(ranking='frequency'):
 
     return result
 
+def hex_to_lab(hex_color: str):
+    """Convert hex color to LAB color space.
+
+    LAB is perceptually uniform - equal distances represent equal
+    perceived color differences.
+
+    Args:
+        hex_color: Hex color string (e.g., '#FF5733')
+
+    Returns:
+        Tuple of (L, a, b) where:
+        - L: Lightness (0-100)
+        - a: Green-Red axis (-128 to 127)
+        - b: Blue-Yellow axis (-128 to 127)
+    """
+    from skimage.color import rgb2lab
+    import numpy as np
+
+    # Convert hex to RGB (normalize to 0-1 range)
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16) / 255.0
+    g = int(hex_color[2:4], 16) / 255.0
+    b = int(hex_color[4:6], 16) / 255.0
+
+    # Convert to LAB using scikit-image
+    rgb_normalized = np.array([[[r, g, b]]])
+    lab = rgb2lab(rgb_normalized)
+
+    # Extract LAB values
+    l_value = float(lab[0, 0, 0])
+    a_value = float(lab[0, 0, 1])
+    b_value = float(lab[0, 0, 2])
+
+    return (l_value, a_value, b_value)
+
 def color_distance(hex1, hex2):
-    """Calculate Euclidean distance between two hex colors in RGB space."""
-    from .color_utils import hex_to_hsv
+    """Calculate Delta E (CIE76) distance between two hex colors in LAB space.
 
+    Delta E is perceptually uniform - equal distances represent equal
+    perceived color differences. This is the standard color difference metric
+    in color science.
+
+    Delta E Scale:
+    - 0-1:     Imperceptible difference
+    - 1-2:     Just noticeable difference (JND)
+    - 2-10:    Noticeable difference
+    - 10-20:   Very different
+    - 20+:     Completely different
+
+    Args:
+        hex1: First hex color (e.g., '#FF5733')
+        hex2: Second hex color (e.g., '#33FF57')
+
+    Returns:
+        Delta E distance (0-150 typical range, 0-200 max)
+    """
     try:
-        # Convert to RGB
-        def hex_to_rgb(hex_color):
-            hex_color = hex_color.lstrip('#')
-            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        lab1 = hex_to_lab(hex1)
+        lab2 = hex_to_lab(hex2)
 
-        rgb1 = hex_to_rgb(hex1)
-        rgb2 = hex_to_rgb(hex2)
+        # Calculate Delta E (CIE76) - Euclidean distance in LAB space
+        delta_L = lab1[0] - lab2[0]
+        delta_a = lab1[1] - lab2[1]
+        delta_b = lab1[2] - lab2[2]
 
-        # Euclidean distance in RGB space
-        return sum((a - b) ** 2 for a, b in zip(rgb1, rgb2)) ** 0.5
-    except:
+        delta_e = (delta_L**2 + delta_a**2 + delta_b**2) ** 0.5
+
+        return delta_e
+    except Exception as e:
+        print(f"Error calculating color distance: {e}")
         return float('inf')
 
 @st.cache_data

@@ -117,11 +117,26 @@ def calculate_perceptual_weight(rgb, hsl, lab, percentage, all_colors_lab):
     # Saturation component (0-100) - more saturated colors are more perceptually distinctive
     saturation_score = hsl[1] / 100.0
 
-    # Calculate average perceptual distance to other colors (contrast) using LAB
-    # LAB is perceptually uniform, so equal Delta E distances represent equal perceived differences
+    # Calculate average perceptual distance to OTHER colors (excluding self)
     if len(all_colors_lab) > 1:
-        distances = [color_distance_lab(lab, other_lab) for other_lab in all_colors_lab if other_lab != lab]
+        # Find index of current color
+        current_index = None
+        for i, existing_lab in enumerate(all_colors_lab):
+            # Use numpy.allclose for floating-point comparison
+            if np.allclose(existing_lab, lab, atol=0.1):
+                current_index = i
+                break
+
+        # Get distances to all OTHER colors (exclude current)
+        distances = []
+        for i, other_lab in enumerate(all_colors_lab):
+            if i != current_index:
+                dist = color_distance_lab(lab, other_lab)
+                distances.append(dist)
+
+        # Average distance (0 if only one color in palette)
         avg_distance = np.mean(distances) if distances else 0
+
         # Normalize to 0-1 (typical max Delta E in a palette is ~100-150, use 150 for normalization)
         contrast_score = min(avg_distance / 150.0, 1.0)
     else:
@@ -208,7 +223,11 @@ def compute_saliency_map(image, mask=None, max_size=512):
 
 def calculate_saliency_weight(saliency_map, image_rgb, rgb):
     """
-    Calculate saliency weight for a specific color given a precomputed saliency map.
+    Calculate saliency weight for a specific color using LAB-based color matching.
+
+    Uses LAB color space for perceptually accurate color matching.
+    A Delta E of 15 is a "noticeable difference" - good threshold for grouping
+    colors from the same K-means cluster.
 
     Args:
         saliency_map: Precomputed saliency map (2D array, 0-1)
@@ -222,11 +241,35 @@ def calculate_saliency_weight(saliency_map, image_rgb, rgb):
         if saliency_map is None or image_rgb is None:
             return 0.0
 
-        # Create color mask for this specific color (with tolerance)
-        tolerance = 30
-        lower = np.array([max(0, rgb[0]-tolerance), max(0, rgb[1]-tolerance), max(0, rgb[2]-tolerance)])
-        upper = np.array([min(255, rgb[0]+tolerance), min(255, rgb[1]+tolerance), min(255, rgb[2]+tolerance)])
-        color_mask = cv2.inRange(image_rgb, lower, upper)
+        from skimage.color import rgb2lab
+
+        # Convert cluster center to LAB
+        rgb_norm = np.array([[[rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0]]])
+        lab_center = rgb2lab(rgb_norm)[0, 0]
+
+        # Use Delta E threshold of 15 (noticeable but related colors)
+        # This groups pixels from the same K-means cluster together
+        delta_e_threshold = 15.0
+
+        # Convert full image to LAB
+        image_lab = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+
+        # Scale LAB values to standard ranges
+        # OpenCV LAB: L in 0-255, a in 0-255, b in 0-255
+        # Standard LAB: L in 0-100, a in -128-127, b in -128-127
+        image_lab[:,:,0] = (image_lab[:,:,0] / 255.0) * 100.0
+        image_lab[:,:,1] = image_lab[:,:,1] - 128.0
+        image_lab[:,:,2] = image_lab[:,:,2] - 128.0
+
+        # Calculate Delta E (CIE76) for each pixel
+        delta_L = (image_lab[:,:,0] - lab_center[0])**2
+        delta_a = (image_lab[:,:,1] - lab_center[1])**2
+        delta_b = (image_lab[:,:,2] - lab_center[2])**2
+
+        delta_e = np.sqrt(delta_L + delta_a + delta_b)
+
+        # Create binary mask for colors within threshold
+        color_mask = (delta_e <= delta_e_threshold).astype(np.uint8)
 
         # Get mean saliency where this color appears
         if np.any(color_mask):
