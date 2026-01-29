@@ -27,37 +27,36 @@ if not cluster_stats:
     st.error(f"No cluster data available for DINOv2")
     st.stop()
 
-# All Clusters Overview
-st.header("All Clusters")
-
-cluster_ids = sorted(cluster_stats.keys())
-cluster_cols = st.columns(min(len(cluster_ids), 8))
-
-for idx, cluster_id in enumerate(cluster_ids):
-    col_idx = idx % len(cluster_cols)
-    with cluster_cols[col_idx]:
-        if st.button(
-            f"**{cluster_id}**\n{cluster_stats[cluster_id]} plants",
-            key=f"cluster_{cluster_id}",
-            use_container_width=True
-        ):
-            st.session_state.selected_cluster_id = cluster_id
-            st.rerun()
-
-st.markdown("---")
-
 # Cluster selection
+cluster_ids = sorted(cluster_stats.keys())
+
 if 'selected_cluster_id' not in st.session_state:
     st.session_state.selected_cluster_id = cluster_ids[0]
 
-selected_cluster_id = st.session_state.selected_cluster_id
+# Dropdown selector
+cluster_options = {f"Cluster {int(cid)} ({cluster_stats[cid]} plants)": cid for cid in cluster_ids}
+selected_label = st.selectbox(
+    "Select a cluster",
+    options=list(cluster_options.keys()),
+    index=cluster_ids.index(st.session_state.selected_cluster_id)
+)
+selected_cluster_id = cluster_options[selected_label]
+st.session_state.selected_cluster_id = selected_cluster_id
+
+st.markdown("---")
 
 # Display cluster
-st.header(f"Cluster {selected_cluster_id}")
+st.header(f"Cluster {int(selected_cluster_id)}")
 
 filtered_df = data_loader.get_plants_by_cluster(selected_model, selected_cluster_id)
 
 st.caption(f"{len(filtered_df)} plants in this cluster")
+
+# Display color palette for cluster
+st.markdown("**Dominant Colors in Cluster**")
+cluster_palette = data_loader.get_cluster_color_palette(selected_model, selected_cluster_id, ranking='frequency')
+cluster_html = charts.create_group_color_palette_html(cluster_palette)
+st.markdown(cluster_html, unsafe_allow_html=True)
 
 # Display options
 col1, col2, col3 = st.columns([2, 2, 1])
@@ -71,8 +70,7 @@ with col1:
     )
 
 with col2:
-    num_colors = st.slider("Colors shown", 3, 5, 5)
-
+    num_colors = 5
 with col3:
     plants_per_page = st.selectbox("Per page", [20, 40, 60], index=1)
 
@@ -159,8 +157,8 @@ for row_idx in range(rows):
             colors = data_loader.get_color_palette(plant_id, ranking=color_ranking)
             if colors:
                 st.markdown(charts.create_color_palette_display(colors[:num_colors]), unsafe_allow_html=True)
-
+            st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
             # Link to detail page
             if st.button("Details", key=f"detail_{plant_id}", use_container_width=True):
                 st.session_state.selected_plant_id = plant_id
-                st.switch_page("pages/4_Plant_Detail.py")
+                st.switch_page("pages/Plant_Detail.py")

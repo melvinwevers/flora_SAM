@@ -1251,9 +1251,9 @@ def main():
         help='Output directory for CSV files and plots'
     )
     parser.add_argument(
-        '--skip-plots',
+        '--plots',
         action='store_true',
-        help='Skip generating matplotlib visualizations'
+        help='Generate matplotlib visualizations (disabled by default)'
     )
 
     args = parser.parse_args()
@@ -1297,8 +1297,8 @@ def main():
             for fam1, fam2, dist in taxonomic_analysis['family_overlaps'][:10]:
                 logger.info(f"  {fam1} <-> {fam2}: {dist:.1f}")
 
-        # Generate visualizations
-        if not args.skip_plots:
+        # Generate visualizations (optional)
+        if args.plots:
             logger.info("\n=== Generating Visualizations ===")
             plot_files = generate_all_visualizations(df, taxonomic_analysis, args.output_dir)
             for pf in plot_files:

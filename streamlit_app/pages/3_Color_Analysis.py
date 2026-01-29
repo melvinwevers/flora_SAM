@@ -38,18 +38,7 @@ with col1:
         st.session_state.color_page = 1  # Reset pagination
         st.rerun()
 
-    # Show large color swatch
-    swatch_html = f"""
-    <div style="
-        width: 100%;
-        height: 120px;
-        background: {selected_color};
-        border: 2px solid #ccc;
-        border-radius: 8px;
-        margin-top: 10px;
-    "></div>
-    """
-    st.markdown(swatch_html, unsafe_allow_html=True)
+
 
 with col2:
     st.header("Settings")
@@ -71,7 +60,7 @@ with col2:
             "Color similarity",
             min_value=0,
             max_value=100,
-            value=70,
+            value=10,
             help="Higher = include more plants with similar colors. Lower = only very close matches."
         )
         # Convert to distance (invert the scale)
@@ -94,22 +83,10 @@ col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
 with col1:
     show_palette = st.checkbox("Show color palettes", value=True)
 
-with col2:
-    if show_palette:
-        num_colors = st.slider("Colors shown", 1, 5, 5)
-    else:
-        num_colors = 5
+num_colors = 5
 
 with col3:
-    if show_palette:
-        palette_style = st.radio(
-            "Palette style",
-            options=["squares", "circles", "bar"],
-            horizontal=True,
-            label_visibility="collapsed"
-        )
-    else:
-        palette_style = "squares"
+    palette_style = "squares"
 
 with col4:
     plants_per_page = st.selectbox("Per page", [20, 40, 60], index=1)
@@ -196,14 +173,9 @@ for row_idx in range(rows):
             if show_palette:
                 colors = data_loader.get_color_palette(plant_id, ranking=color_ranking)
                 if colors:
-                    if palette_style == "circles":
-                        st.markdown(charts.create_color_palette_circles(colors[:num_colors]), unsafe_allow_html=True)
-                    elif palette_style == "bar":
-                        st.markdown(charts.create_color_palette_bar(colors[:num_colors]), unsafe_allow_html=True)
-                    else:
-                        st.markdown(charts.create_color_palette_display(colors[:num_colors]), unsafe_allow_html=True)
-
+                    st.markdown(charts.create_color_palette_display(colors[:num_colors]), unsafe_allow_html=True)
+            st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
             # Link to detail page
             if st.button("Details", key=f"detail_{plant_id}", use_container_width=True):
                 st.session_state.selected_plant_id = plant_id
-                st.switch_page("pages/4_Plant_Detail.py")
+                st.switch_page("pages/Plant_Detail.py")

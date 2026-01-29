@@ -4,7 +4,7 @@ Color Analysis Tool for Segmented Images
 
 Extracts dominant colors from segmented flora images:
 - Extracts top 5 dominant colors using k-means clustering
-- Provides both RGB and HSL color representations
+- Provides RGB, HSL, and LAB color representations
 - Filters out background colors (optional)
 - Updates metadata with color information
 """
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from skimage.color import rgb2lab
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
@@ -24,6 +25,25 @@ def rgb_to_hsl(r, g, b):
     """Convert RGB (0-255) to HSL (H: 0-360, S: 0-100, L: 0-100)"""
     h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
     return (int(h * 360), int(s * 100), int(l * 100))
+
+
+def rgb_to_lab(r, g, b):
+    """
+    Convert RGB (0-255) to LAB color space.
+
+    Args:
+        r, g, b: RGB values in range 0-255
+
+    Returns:
+        Tuple of (L, a, b) where:
+        - L: Lightness (0-100)
+        - a: Green-Red axis (-128 to 127)
+        - b: Blue-Yellow axis (-128 to 127)
+    """
+    # Normalize RGB to 0-1 range and reshape for skimage
+    rgb_normalized = np.array([[[r / 255.0, g / 255.0, b / 255.0]]])
+    lab = rgb2lab(rgb_normalized)
+    return [float(lab[0, 0, 0]), float(lab[0, 0, 1]), float(lab[0, 0, 2])]
 
 
 def color_distance(color1, color2):
@@ -40,6 +60,23 @@ def color_distance(color1, color2):
     r1, g1, b1 = color1
     r2, g2, b2 = color2
     return np.sqrt((r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2)
+
+
+def color_distance_lab(lab1, lab2):
+    """
+    Calculate Delta E (CIE76) distance between two LAB colors.
+    This is perceptually uniform - equal distances represent equal perceived differences.
+
+    Args:
+        lab1: Tuple/list of (L, a, b) values
+        lab2: Tuple/list of (L, a, b) values
+
+    Returns:
+        Delta E distance as a float
+    """
+    l1, a1, b1 = lab1
+    l2, a2, b2 = lab2
+    return np.sqrt((l1 - l2)**2 + (a1 - a2)**2 + (b1 - b2)**2)
 
 
 def is_similar_to_background(rgb, background_rgb, tolerance=50):
@@ -61,17 +98,18 @@ def is_similar_to_background(rgb, background_rgb, tolerance=50):
     return distance <= tolerance
 
 
-def calculate_perceptual_weight(rgb, hsl, percentage, all_colors):
+def calculate_perceptual_weight(rgb, hsl, lab, percentage, all_colors_lab):
     """
     Calculate perceptual weight combining frequency, saturation, and contrast.
 
     This is a heuristic for color palette ranking, NOT true visual salience.
 
     Args:
-        rgb: RGB tuple of the color
+        rgb: RGB tuple of the color (kept for backwards compatibility)
         hsl: HSL tuple of the color (H, S, L)
+        lab: LAB tuple of the color (L, a, b)
         percentage: Frequency percentage
-        all_colors: List of all RGB colors for contrast calculation
+        all_colors_lab: List of all LAB colors for perceptually accurate contrast calculation
 
     Returns:
         Perceptual weight score (higher = more perceptually distinctive)
@@ -79,12 +117,13 @@ def calculate_perceptual_weight(rgb, hsl, percentage, all_colors):
     # Saturation component (0-100) - more saturated colors are more perceptually distinctive
     saturation_score = hsl[1] / 100.0
 
-    # Calculate average distance to other colors (contrast)
-    if len(all_colors) > 1:
-        distances = [color_distance(rgb, other_rgb) for other_rgb in all_colors if other_rgb != rgb]
+    # Calculate average perceptual distance to other colors (contrast) using LAB
+    # LAB is perceptually uniform, so equal Delta E distances represent equal perceived differences
+    if len(all_colors_lab) > 1:
+        distances = [color_distance_lab(lab, other_lab) for other_lab in all_colors_lab if other_lab != lab]
         avg_distance = np.mean(distances) if distances else 0
-        # Normalize to 0-1 (max distance in RGB space is ~441)
-        contrast_score = min(avg_distance / 200.0, 1.0)
+        # Normalize to 0-1 (typical max Delta E in a palette is ~100-150, use 150 for normalization)
+        contrast_score = min(avg_distance / 150.0, 1.0)
     else:
         contrast_score = 0
 
@@ -265,6 +304,7 @@ def extract_dominant_colors(
     # Create color data with percentages
     color_data = []
     all_rgb_colors = []
+    all_lab_colors = []
 
     for label, count in zip(unique_labels, counts):
         rgb = tuple(colors[label])
@@ -276,15 +316,19 @@ def extract_dominant_colors(
                 continue
 
         hsl = rgb_to_hsl(*rgb)
+        lab = rgb_to_lab(*rgb)
         all_rgb_colors.append(rgb)
+        all_lab_colors.append(lab)
 
         color_data.append({
             'rgb': [int(rgb[0]), int(rgb[1]), int(rgb[2])],
             'hsl': [int(hsl[0]), int(hsl[1]), int(hsl[2])],
+            'lab': lab,
             'percentage': round(float(percentage), 2),
             'hex': '#{:02x}{:02x}{:02x}'.format(*rgb),
             'rgb_tuple': rgb,  # Keep for visual importance calculation
-            'hsl_tuple': hsl
+            'hsl_tuple': hsl,
+            'lab_tuple': lab  # Keep for perceptual weight calculation
         })
 
     # Always calculate visual importance for all colors
@@ -294,11 +338,13 @@ def extract_dominant_colors(
 
         for color in color_data:
             # Calculate perceptual weight (heuristic based on color properties)
+            # Uses LAB for perceptually accurate contrast calculation
             perceptual = calculate_perceptual_weight(
                 color['rgb_tuple'],
                 color['hsl_tuple'],
+                color['lab_tuple'],
                 color['percentage'],
-                all_rgb_colors
+                all_lab_colors
             )
             color['perceptual_weight'] = round(perceptual, 4)
 

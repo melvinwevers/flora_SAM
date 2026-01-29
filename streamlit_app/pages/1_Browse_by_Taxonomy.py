@@ -50,8 +50,7 @@ color_ranking = st.sidebar.radio(
     format_func=lambda x: {"frequency": "Frequency", "perceptual": "Perceptual", "saliency": "Salience"}[x]
 )
 
-# Number of colors
-num_colors = st.sidebar.slider("Colors shown", 3, 5, 5)
+num_colors = 5
 
 # Items per page
 items_per_page = st.sidebar.selectbox("Plants per page", [20, 40, 60], index=1)
@@ -82,6 +81,27 @@ if family_filter:
     col2.metric("Family", family_filter)
 if genus_filter:
     col3.metric("Genus", genus_filter)
+
+# Display color palettes for selected taxonomy
+if family_filter or genus_filter:
+    st.markdown("---")
+    st.subheader("🎨 Dominant Colors")
+
+    palette_cols = st.columns([1, 1] if (family_filter and genus_filter) else [1])
+
+    if family_filter and family_filter != "All Families":
+        with palette_cols[0]:
+            st.markdown(f"**{family_filter}** (Family)")
+            family_palette = data_loader.get_family_color_palette(family_filter, ranking=color_ranking)
+            family_html = charts.create_group_color_palette_html(family_palette)
+            st.markdown(family_html, unsafe_allow_html=True)
+
+    if genus_filter and genus_filter != "All Genera" and len(palette_cols) > 1:
+        with palette_cols[1]:
+            st.markdown(f"**{genus_filter}** (Genus)")
+            genus_palette = data_loader.get_genus_color_palette(genus_filter, ranking=color_ranking)
+            genus_html = charts.create_group_color_palette_html(genus_palette)
+            st.markdown(genus_html, unsafe_allow_html=True)
 
 # Plants grid
 if len(filtered_df) == 0:
@@ -170,7 +190,9 @@ else:
                 if colors:
                     st.markdown(charts.create_color_palette_display(colors[:num_colors]), unsafe_allow_html=True)
 
+                st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
+
                 # View details
                 if st.button("Details", key=f"detail_{plant_id}", use_container_width=True):
                     st.session_state.selected_plant_id = plant_id
-                    st.switch_page("pages/4_Plant_Detail.py")
+                    st.switch_page("pages/Plant_Detail.py")

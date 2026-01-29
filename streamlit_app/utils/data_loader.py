@@ -302,3 +302,76 @@ def get_plants_by_color_similarity(target_hex, ranking='frequency', max_distance
         result = result.head(limit)
 
     return result
+
+def get_family_color_palette(family, ranking='frequency', top_n=8):
+    """Get dominant colors for a family, binned by hue.
+
+    Args:
+        family: Family name
+        ranking: Color ranking to use ('frequency' or 'saliency')
+        top_n: Maximum number of colors to return
+
+    Returns:
+        List of dicts with 'hex', 'bucket', and 'count' keys
+    """
+    from utils.color_utils import get_group_color_palette
+
+    df = load_merged_data()
+    family_df = df[df['family'] == family]
+
+    # Get all dominant color hexes for this family
+    color_col = f'color_freq_1_hex' if ranking == 'frequency' else 'color_visual_1_hex'
+    colors = family_df[color_col].dropna().tolist()
+
+    return get_group_color_palette(colors, top_n=top_n)
+
+
+def get_genus_color_palette(genus, ranking='frequency', top_n=8):
+    """Get dominant colors for a genus, binned by hue.
+
+    Args:
+        genus: Genus name
+        ranking: Color ranking to use ('frequency' or 'saliency')
+        top_n: Maximum number of colors to return
+
+    Returns:
+        List of dicts with 'hex', 'bucket', and 'count' keys
+    """
+    from utils.color_utils import get_group_color_palette
+
+    df = load_merged_data()
+    genus_df = df[df['genus'] == genus]
+
+    # Get all dominant color hexes for this genus
+    color_col = f'color_freq_1_hex' if ranking == 'frequency' else 'color_visual_1_hex'
+    colors = genus_df[color_col].dropna().tolist()
+
+    return get_group_color_palette(colors, top_n=top_n)
+
+
+def get_cluster_color_palette(model, cluster_id, ranking='frequency', top_n=8):
+    """Get dominant colors for a cluster, binned by hue.
+
+    Args:
+        model: Clustering model name (e.g., 'dinov2')
+        cluster_id: Cluster ID
+        ranking: Color ranking to use ('frequency' or 'saliency')
+        top_n: Maximum number of colors to return
+
+    Returns:
+        List of dicts with 'hex', 'bucket', and 'count' keys
+    """
+    from utils.color_utils import get_group_color_palette
+
+    df = load_merged_data()
+
+    if model not in df.columns:
+        return []
+
+    cluster_df = df[df[model] == cluster_id]
+
+    # Get all dominant color hexes for this cluster
+    color_col = f'color_freq_1_hex' if ranking == 'frequency' else 'color_visual_1_hex'
+    colors = cluster_df[color_col].dropna().tolist()
+
+    return get_group_color_palette(colors, top_n=top_n)

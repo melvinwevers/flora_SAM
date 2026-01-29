@@ -1,26 +1,22 @@
 [project]
 name = "flora"
 version = "0.1.0"
-description = "Add your description here"
+description = "Flora Batava Plant Explorer - Browse botanical illustrations by taxonomy, visual similarity, and color analysis."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "jupyter>=1.1.1",
-    "matplotlib>=3.10.7",
-    "numpy>=2.3.3",
-    "opencv-python>=4.11.0.86",
-    "openpyxl>=3.1.5",
+    "streamlit>=1.28.0",
     "pandas>=2.3.3",
     "plotly>=5.0.0",
-    "requests>=2.32.5",
-    "scikit-learn>=1.3.0",
-    "segment-anything>=1.0",
-    "torch>=2.8.0",
-    "torchvision>=0.23.0",
-    "tqdm>=4.67.1",
+    "pillow>=10.0.0",
 ]
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.0.1",
-]
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.7",
+    "opencv-python>=4.11.0.86",
+    "openpyxl>=3.1.5",
+    "scikit-learn>=1.3.0",
+    "torch>=2.8.0",
+    "torchvision>=0.23.0",]

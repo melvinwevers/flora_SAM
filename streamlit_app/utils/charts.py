@@ -315,3 +315,40 @@ def create_bar_chart(data, x_label, y_label, title="Bar Chart"):
     fig.update_layout(height=400, width=600)
 
     return fig
+
+def create_group_color_palette_html(palette_data):
+    """
+    Create HTML for displaying a group's color palette (hue-binned).
+
+    Args:
+        palette_data: List of dicts with 'hex', 'bucket', and 'count' keys
+
+    Returns:
+        HTML string for the palette
+    """
+    if not palette_data:
+        return "<p>No colors found</p>"
+
+    swatches = []
+    total_count = sum(p['count'] for p in palette_data)
+
+    for item in palette_data:
+        hex_code = item.get('hex', '')
+        bucket = item.get('bucket', 'Unknown')
+        count = item.get('count', 0)
+
+        if not hex_code or str(hex_code) == 'nan':
+            continue
+
+        percentage = (count / total_count * 100) if total_count > 0 else 0
+
+        swatches.append(
+            f'<div style="text-align:center;flex:0 0 auto;" title="{bucket} ({count} plants)">'
+            f'<div style="width:48px;height:48px;background:{hex_code};border:2px solid #ccc;border-radius:6px;"></div>'
+            f'<div style="font-size:10px;margin-top:4px;line-height:1.2;white-space:nowrap;">'
+            f'<strong>{bucket}</strong><br/>{percentage:.0f}%'
+            f'</div>'
+            f'</div>'
+        )
+
+    return f'<div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:8px;max-width:100%;padding:10px;">{"".join(swatches)}</div>'

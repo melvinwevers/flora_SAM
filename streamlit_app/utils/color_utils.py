@@ -159,3 +159,57 @@ def get_color_bucket_info(bucket_name: str) -> Dict:
         'hex': '#CCCCCC',
         'name': bucket_name
     })
+
+def get_group_color_palette(hex_colors, top_n=8):
+    """
+    Get dominant colors from a group, binned by hue to avoid duplicates.
+
+    Groups colors by hue bucket, then returns the most frequent color from each bucket.
+    This prevents getting 5 shades of green and instead shows diversity.
+
+    Args:
+        hex_colors: List of hex color strings (e.g., ['#FF5733', '#28A745', ...])
+        top_n: Maximum number of colors to return
+
+    Returns:
+        List of dicts with 'hex', 'bucket', and 'count' keys, sorted by frequency
+    """
+    if not hex_colors:
+        return []
+
+    # Bin colors by hue bucket
+    bucket_colors = {}
+
+    for hex_color in hex_colors:
+        if not hex_color or str(hex_color) == 'nan':
+            continue
+
+        bucket = categorize_color(hex_color)
+
+        if bucket not in bucket_colors:
+            bucket_colors[bucket] = []
+        bucket_colors[bucket].append(hex_color)
+
+    # For each bucket, get the most frequent color
+    palette = []
+    for bucket, colors in bucket_colors.items():
+        # Count frequency of each unique color in this bucket
+        color_counts = {}
+        for color in colors:
+            color_counts[color] = color_counts.get(color, 0) + 1
+
+        # Get most frequent
+        most_frequent_hex = max(color_counts, key=color_counts.get)
+        count = color_counts[most_frequent_hex]
+
+        palette.append({
+            'hex': most_frequent_hex,
+            'bucket': bucket,
+            'count': count
+        })
+
+    # Sort by frequency (descending)
+    palette.sort(key=lambda x: x['count'], reverse=True)
+
+    # Return top N
+    return palette[:top_n]

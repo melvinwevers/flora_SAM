@@ -6,8 +6,7 @@ An interactive Streamlit application for exploring 2,241 historical botanical il
 
 - **Browse by Taxonomy**: Navigate through plant families, genera, and species
 - **Visual Clusters**: Explore AI-discovered similarity groups using DINOv2, CLIP, PlantNet, and Combined embeddings
-- **Color Analysis**: Analyze color patterns and compare taxonomy vs visual clusters
-- **Plant Details**: Deep dive into individual plants with colors, clusters, and related specimens
+- **Color Analysis**: Analyze color patterns and their relationships to taxonomy and clusters
 
 ## Running Locally
 
@@ -37,11 +36,10 @@ pip install streamlit pandas plotly pillow
 
 ```bash
 # From streamlit_app directory
-streamlit run app.py
+streamlit run Home.py
 
 # Or from project root
-cd .worktrees/streamlit-app/streamlit_app
-streamlit run app.py
+streamlit run streamlit_app/Home.py
 ```
 
 The app will open in your default browser at `http://localhost:8501`.
@@ -51,12 +49,11 @@ The app will open in your default browser at `http://localhost:8501`.
 ```
 streamlit_app/
 ├── app.py                 # Main entry point
+├── Home.py                # Main entry point
 ├── pages/
 │   ├── 1_Browse_by_Taxonomy.py
 │   ├── 2_Visual_Clusters.py
-│   ├── 3_Color_Analysis.py
-│   └── 4_Plant_Detail.py
-├── data/
+│   └── 3_Color_Analysis
 │   ├── plants_metadata.csv          # Plant metadata with colors
 │   ├── cluster_assignments.csv      # Cluster memberships
 │   └── comparison_metrics.json      # Precomputed analysis
@@ -80,7 +77,7 @@ streamlit_app/
 3. Go to [share.streamlit.io](https://share.streamlit.io)
 4. Connect your GitHub repository
 5. Set main file path: `streamlit_app/app.py`
-6. Deploy!
+6. Deploy!Home
 
 Streamlit Cloud supports Git LFS out of the box.
 

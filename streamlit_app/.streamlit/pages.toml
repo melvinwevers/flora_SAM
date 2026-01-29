@@ -18,7 +18,3 @@ path = "pages/3_Color_Analysis.py"
 name = "Color Analysis"
 icon = "🌈"
 
-[[pages]]
-path = "pages/4_Plant_Detail.py"
-name = "Plant Detail"
-icon = "🔍"
