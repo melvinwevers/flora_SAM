@@ -14,11 +14,15 @@ st.set_page_config(
     page_title="Flora Batava Explorer",
     page_icon="🌿",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'About': "Flora Batava Plant Explorer - Browse botanical illustrations by taxonomy, visual similarity, and color analysis."
+    }
 )
 
-# Main page
+# Home page
 st.title("🌿 Flora Batava Plant Explorer")
+st.caption("Home")
 
 st.markdown("""
 Welcome to the Flora Batava Plant Explorer! This interactive application allows you to explore
@@ -51,12 +55,12 @@ with st.expander("ℹ️ How are colors ranked?"):
     - Best for: Identifying vibrant or unusual colors regardless of location
 
     ### 3. Salience Ranking
-    Colors ranked by **spatial attention** - true visual salience using:
-    - Spectral Residual method (or edge-based fallback)
-    - Analyzes image frequencies to detect unexpected/salient regions
-    - Weights colors by overlap with high-attention areas
-    - Uses: Finding colors that naturally draw the eye
-    - Best for: Identifying diagnostic features the illustrator emphasized (flowers, fruits)
+    Colors ranked by **spatial attention** - measures visual salience:
+    - **Method**: OpenCV Spectral Residual (frequency-domain analysis) or edge-based fallback (Sobel operators + Gaussian blur)
+    - **Process**: Creates saliency map highlighting attention-grabbing regions, then weights each color by its overlap with high-saliency areas
+    - **Color scoring**: For each color, finds all pixels matching that color (±30 RGB tolerance) and averages their saliency values
+    - **Result**: Colors appearing in visually salient regions (edges, contrasts, focal points) rank higher
+    - **Best for**: Identifying diagnostic botanical features the illustrator emphasized (flowers, fruits, distinctive structures)
 
     ### Which to Use?
 
