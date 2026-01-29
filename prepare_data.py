@@ -269,6 +269,19 @@ def main():
     if len(clusters_df) > 0:
         metrics = compute_comparison_metrics(plants_df, clusters_df)
 
+    # Step 6: Convert Flora Batava Index Excel to CSV (removes Excel dependency)
+    flora_index_excel = Path("data/Flora Batava Index.xlsx")
+    if flora_index_excel.exists():
+        print("Converting Flora Batava Index to CSV...")
+        flora_df = pd.read_excel(flora_index_excel)
+        flora_subset = flora_df[['Huidige Nederlandse naam', 'Oude Nederlandse naam in Flora Batava',
+                                  'Huidige botanische naam', 'Link naar scans in bladerboek KB']]
+        flora_csv_path = OUTPUT_DIR / "flora_batava_index.csv"
+        flora_subset.to_csv(flora_csv_path, index=False)
+        print(f"  ✓ Saved {len(flora_subset)} entries to {flora_csv_path}")
+    else:
+        print(f"  ⚠ Warning: {flora_index_excel} not found, skipping Flora Batava Index conversion")
+
     print("=" * 60)
     print("Data preparation complete!")
     print(f"Output directory: {OUTPUT_DIR}")

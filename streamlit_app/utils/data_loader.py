@@ -16,13 +16,8 @@ def load_dutch_names():
 
     The Flora Batava Index rows align with plants_metadata rows by index.
     """
-    df = pd.read_excel(DATA_DIR / "Flora Batava Index.xlsx")
-
-    # Select relevant columns - the index alignment is maintained
-    result = df[['Huidige Nederlandse naam', 'Oude Nederlandse naam in Flora Batava',
-                 'Huidige botanische naam', 'Link naar scans in bladerboek KB']].copy()
-
-    return result
+    df = pd.read_csv(DATA_DIR / "flora_batava_index.csv")
+    return df
 
 @st.cache_data
 def load_plants_metadata():
