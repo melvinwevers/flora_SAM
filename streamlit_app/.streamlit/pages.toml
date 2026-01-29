@@ -1,0 +1,24 @@
+[[pages]]
+path = "app.py"
+name = "Home"
+icon = "🏠"
+
+[[pages]]
+path = "pages/1_Browse_by_Taxonomy.py"
+name = "Browse by Taxonomy"
+icon = "🌳"
+
+[[pages]]
+path = "pages/2_Visual_Clusters.py"
+name = "Visual Clusters"
+icon = "🎨"
+
+[[pages]]
+path = "pages/3_Color_Analysis.py"
+name = "Color Analysis"
+icon = "🌈"
+
+[[pages]]
+path = "pages/4_Plant_Detail.py"
+name = "Plant Detail"
+icon = "🔍"

@@ -1,0 +1,7 @@
+[ui]
+# Hide the main page from the sidebar (we'll use the navigation to show "Home")
+hideSidebarNav = false
+
+[client]
+# Show the toolbar
+toolbarMode = "auto"

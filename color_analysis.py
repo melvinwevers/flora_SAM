@@ -61,9 +61,11 @@ def is_similar_to_background(rgb, background_rgb, tolerance=50):
     return distance <= tolerance
 
 
-def calculate_visual_importance(rgb, hsl, percentage, all_colors):
+def calculate_perceptual_weight(rgb, hsl, percentage, all_colors):
     """
-    Calculate visual importance score combining frequency, saturation, and contrast.
+    Calculate perceptual weight combining frequency, saturation, and contrast.
+
+    This is a heuristic for color palette ranking, NOT true visual salience.
 
     Args:
         rgb: RGB tuple of the color
@@ -72,9 +74,9 @@ def calculate_visual_importance(rgb, hsl, percentage, all_colors):
         all_colors: List of all RGB colors for contrast calculation
 
     Returns:
-        Visual importance score (higher = more important)
+        Perceptual weight score (higher = more perceptually distinctive)
     """
-    # Saturation component (0-100) - more saturated colors are more visually important
+    # Saturation component (0-100) - more saturated colors are more perceptually distinctive
     saturation_score = hsl[1] / 100.0
 
     # Calculate average distance to other colors (contrast)
@@ -91,9 +93,113 @@ def calculate_visual_importance(rgb, hsl, percentage, all_colors):
 
     # Weighted combination: 40% frequency, 30% saturation, 30% contrast
     # This gives frequency most weight but still values visually distinct colors
-    importance = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
+    weight = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
 
-    return importance
+    return weight
+
+
+def compute_saliency_map(image, mask=None, max_size=512):
+    """
+    Compute saliency map for an image once (to be reused for all colors).
+
+    Args:
+        image: BGR image (OpenCV format)
+        mask: Optional binary mask of the segmented object
+        max_size: Maximum dimension for saliency computation (downscale if larger)
+
+    Returns:
+        Saliency map (2D array, values 0-1) and RGB image
+    """
+    try:
+        # Downscale image for faster saliency computation if needed
+        h, w = image.shape[:2]
+        scale = 1.0
+        if max(h, w) > max_size:
+            scale = max_size / max(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            image_small = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            image_small = image
+
+        # Convert to RGB for saliency detection
+        image_rgb = cv2.cvtColor(image_small, cv2.COLOR_BGR2RGB)
+
+        # Try OpenCV contrib saliency module
+        if hasattr(cv2, 'saliency'):
+            # Create saliency detector using Spectral Residual method
+            saliency_detector = cv2.saliency.StaticSaliencySpectralResidual_create()
+            success, saliency_map = saliency_detector.computeSaliency(image_rgb)
+
+            if not success:
+                raise ValueError("Saliency computation failed")
+        else:
+            # Fallback: simple edge-based saliency approximation
+            # Convert to grayscale
+            gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+
+            # Compute edges using Sobel
+            sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            edge_magnitude = np.sqrt(sobelx**2 + sobely**2)
+
+            # Normalize to 0-1
+            if edge_magnitude.max() > 0:
+                saliency_map = edge_magnitude / edge_magnitude.max()
+            else:
+                saliency_map = edge_magnitude
+
+            # Smooth the saliency map
+            saliency_map = cv2.GaussianBlur(saliency_map, (9, 9), 0)
+
+        # Upscale saliency map back to original size if we downscaled
+        if scale < 1.0:
+            saliency_map = cv2.resize(saliency_map, (w, h), interpolation=cv2.INTER_LINEAR)
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Use original full-size image
+
+        # Apply mask if provided
+        if mask is not None:
+            saliency_map = saliency_map * mask
+
+        return saliency_map, image_rgb
+
+    except Exception as e:
+        print(f"Warning: Saliency map computation failed: {e}")
+        return None, None
+
+
+def calculate_saliency_weight(saliency_map, image_rgb, rgb):
+    """
+    Calculate saliency weight for a specific color given a precomputed saliency map.
+
+    Args:
+        saliency_map: Precomputed saliency map (2D array, 0-1)
+        image_rgb: RGB image
+        rgb: RGB tuple of the color to weight
+
+    Returns:
+        Saliency weight (0-1, higher = more salient)
+    """
+    try:
+        if saliency_map is None or image_rgb is None:
+            return 0.0
+
+        # Create color mask for this specific color (with tolerance)
+        tolerance = 30
+        lower = np.array([max(0, rgb[0]-tolerance), max(0, rgb[1]-tolerance), max(0, rgb[2]-tolerance)])
+        upper = np.array([min(255, rgb[0]+tolerance), min(255, rgb[1]+tolerance), min(255, rgb[2]+tolerance)])
+        color_mask = cv2.inRange(image_rgb, lower, upper)
+
+        # Get mean saliency where this color appears
+        if np.any(color_mask):
+            saliency_for_color = saliency_map[color_mask > 0]
+            mean_saliency = np.mean(saliency_for_color)
+            return float(mean_saliency)
+        else:
+            return 0.0
+
+    except Exception as e:
+        print(f"Warning: Saliency weight calculation failed: {e}")
+        return 0.0
 
 
 def extract_dominant_colors(
@@ -144,7 +250,8 @@ def extract_dominant_colors(
     # Perform k-means clustering
     # Try to extract more colors initially if we're filtering
     n_clusters = n_colors * 2 if filter_background else n_colors
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    # Reduced max_iter for faster processing with minimal quality loss
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=5, max_iter=100)
     kmeans.fit(pixels)
 
     # Get cluster centers (dominant colors) and their frequencies
@@ -182,30 +289,43 @@ def extract_dominant_colors(
 
     # Always calculate visual importance for all colors
     if len(color_data) > 0:
+        # Compute saliency map once for all colors (major optimization)
+        saliency_map, image_rgb = compute_saliency_map(image)
+
         for color in color_data:
-            importance = calculate_visual_importance(
+            # Calculate perceptual weight (heuristic based on color properties)
+            perceptual = calculate_perceptual_weight(
                 color['rgb_tuple'],
                 color['hsl_tuple'],
                 color['percentage'],
                 all_rgb_colors
             )
-            color['visual_importance'] = round(importance, 4)
+            color['perceptual_weight'] = round(perceptual, 4)
 
-    # If calculate_both, return both rankings
+            # Calculate true visual salience using precomputed saliency map
+            saliency = calculate_saliency_weight(saliency_map, image_rgb, color['rgb_tuple'])
+            color['saliency_weight'] = round(saliency, 4)
+
+            # For backwards compatibility, use saliency as primary
+            color['visual_importance'] = round(saliency, 4)
+
+    # If calculate_both, return all three rankings
     if calculate_both:
-        # Create frequency-sorted list
+        # Create three sorted lists
         frequency_sorted = sorted(color_data, key=lambda x: x['percentage'], reverse=True)
-        # Create visual importance-sorted list
-        visual_sorted = sorted(color_data, key=lambda x: x['visual_importance'], reverse=True)
+        perceptual_sorted = sorted(color_data, key=lambda x: x['perceptual_weight'], reverse=True)
+        saliency_sorted = sorted(color_data, key=lambda x: x['saliency_weight'], reverse=True)
 
-        # Clean up temporary fields for both lists
-        for color in frequency_sorted + visual_sorted:
+        # Clean up temporary fields for all lists
+        all_colors = frequency_sorted + perceptual_sorted + saliency_sorted
+        for color in all_colors:
             color.pop('rgb_tuple', None)
             color.pop('hsl_tuple', None)
 
         return {
             'frequency': frequency_sorted[:n_colors],
-            'visual': visual_sorted[:n_colors]
+            'perceptual': perceptual_sorted[:n_colors],
+            'saliency': saliency_sorted[:n_colors]
         }
     else:
         # Default: sort by percentage (most dominant first)
@@ -226,7 +346,8 @@ class ColorAnalyzer:
         mask_output_dir,
         n_colors=5,
         filter_background=True,
-        background_tolerance=50
+        background_tolerance=50,
+        force=False
     ):
         """
         Initialize Color Analyzer.
@@ -236,11 +357,13 @@ class ColorAnalyzer:
             n_colors: Number of dominant colors to extract per image
             filter_background: Whether to filter out background colors
             background_tolerance: Color distance tolerance for background filtering
+            force: Force reprocessing of all images
         """
         self.mask_output_dir = Path(mask_output_dir)
         self.n_colors = n_colors
         self.filter_background = filter_background
         self.background_tolerance = background_tolerance
+        self.force = force
 
         # Load existing metadata
         self.metadata_file = self.mask_output_dir / "masks_metadata.json"
@@ -287,10 +410,23 @@ class ColorAnalyzer:
         errors = 0
 
         for mask_key, entry in tqdm(self.masks_metadata.items(), desc="Analyzing colors"):
-            # Skip if colors already extracted (both methods)
-            if 'colors_frequency' in entry and 'colors_visual' in entry and entry['colors_frequency'] and entry['colors_visual']:
-                skipped += 1
-                continue
+            # Skip if colors already extracted with new three-ranking system (unless --force)
+            if not self.force:
+                # Check for all three ranking lists and the new weight fields
+                has_new_format = False
+                if ('colors_frequency' in entry and entry['colors_frequency'] and
+                    'colors_perceptual' in entry and entry['colors_perceptual'] and
+                    'colors_saliency' in entry and entry['colors_saliency']):
+                    # Verify the colors have the new weight fields
+                    first_freq = entry['colors_frequency'][0] if entry['colors_frequency'] else {}
+                    first_perc = entry['colors_perceptual'][0] if entry['colors_perceptual'] else {}
+                    first_sal = entry['colors_saliency'][0] if entry['colors_saliency'] else {}
+                    has_new_format = ('perceptual_weight' in first_perc and
+                                      'saliency_weight' in first_sal)
+
+                if has_new_format:
+                    skipped += 1
+                    continue
 
             # Get segmented image path
             segmented_file = entry.get('segmented_file')
@@ -330,11 +466,14 @@ class ColorAnalyzer:
                     calculate_both=True
                 )
 
-                # Update metadata with both rankings
+                # Update metadata with all three rankings
                 entry['colors_frequency'] = color_results['frequency']
-                entry['colors_visual'] = color_results['visual']
+                entry['colors_perceptual'] = color_results['perceptual']
+                entry['colors_saliency'] = color_results['saliency']
                 # Keep 'colors' as default (frequency) for backwards compatibility
                 entry['colors'] = color_results['frequency']
+                # Keep colors_visual for backwards compatibility (use saliency)
+                entry['colors_visual'] = color_results['saliency']
                 entry['n_colors_extracted'] = len(color_results['frequency'])
 
                 processed += 1
@@ -409,6 +548,11 @@ def main():
         action="store_true",
         help="Show color extraction statistics only (don't process)"
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force reprocessing of all images (skip the skip check)"
+    )
 
     args = parser.parse_args()
 
@@ -417,7 +561,8 @@ def main():
             mask_output_dir=args.masks_dir,
             n_colors=args.n_colors,
             filter_background=not args.no_filter_background,
-            background_tolerance=args.tolerance
+            background_tolerance=args.tolerance,
+            force=args.force
         )
 
         if args.stats:
