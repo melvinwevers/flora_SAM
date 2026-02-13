@@ -100,52 +100,47 @@ Use the sidebar to navigate between different views, or use the search above to 
 
 with st.expander("How are colors ranked?"):
     st.markdown("""
-    The app provides **three different color rankings** for each plant:
+    The app provides **four different color rankings** for each plant:
 
-    ### 1. Frequency Ranking
-    Colors sorted by **area coverage** (most common first).
-    - **Method**: K-means clustering extracts dominant colors, then sorts by pixel frequency
-    - **Uses**: Understanding overall color composition
-    - **Best for**: Finding plants with lots of green, identifying background colors
+    ### 1. Frequency
+    Colors sorted by **area coverage** — the most common color first.
+    - **Best for**: Understanding the overall color composition of a plant.
 
-    ### 2. Perceptual Ranking
-    Colors ranked by **perceptual distinctiveness** - a heuristic combining:
+    ### 2. Botanical Contrast
+    Colors ranked by how much they **stand out against a typical botanical background**
+    (greens, browns, beiges, grays). Uses perceptual distance (Delta E in LAB color space)
+    from a reference palette of 14 common botanical illustration tones.
+    - **Formula**: `0.8 × contrast_from_background + 0.2 × frequency`
+    - **Best for**: Surfacing flowers, berries, and unusual pigments that would otherwise
+      be buried behind dominant greens and browns.
+
+    ### 3. Perceptual
+    Colors ranked by **intrinsic visual distinctiveness** — a heuristic combining:
     - Frequency (40%): How much area the color covers
-    - Saturation (30%): How vivid/pure the color is (from HSL color space)
-    - Contrast (30%): Average **Delta E** distance to other colors in the palette (perceptually uniform LAB color space)
-    - **Formula**: `0.4×frequency + 0.3×saturation + 0.3×contrast`
-    - **Implementation**: Computed in `color_analysis.py::calculate_perceptual_weight()`
-    - **Uses**: Finding colors that "pop" due to their inherent properties
-    - **Best for**: Identifying vibrant or unusual colors regardless of location
+    - Saturation (30%): How vivid the color is (HSL color space)
+    - Contrast (30%): Average Delta E distance to the *other colors in the same image*
+    - **Best for**: Colors that are striking due to their inherent properties,
+      independent of where they appear in the image.
 
-    ### 3. Salience Ranking
-    Colors ranked by **spatial attention** - measures visual salience:
-    - **Method**: OpenCV Spectral Residual (`cv2.saliency.StaticSaliencySpectralResidual`) or edge-based fallback (Sobel operators + Gaussian blur)
-    - **Process**:
-      1. Compute saliency map once per image (values 0-1, highlighting attention-grabbing regions)
-      2. For each color, create a mask of pixels within ±30 RGB tolerance
-      3. Average saliency values at those pixel locations
-    - **Implementation**: `color_analysis.py::compute_saliency_map()` and `calculate_saliency_weight()`
-    - **Result**: Colors appearing in visually salient regions (edges, contrasts, focal points) rank higher
-    - **Best for**: Identifying diagnostic botanical features the illustrator emphasized (flowers, fruits, distinctive structures)
+    ### 4. Salience
+    Colors ranked by **spatial attention** — where the eye is drawn in the image.
+    - **Method**: OpenCV Spectral Residual saliency map (or Sobel edge fallback)
+    - **Process**: Compute a saliency map (0–1) for the image, then average saliency
+      values at the pixels belonging to each color cluster.
+    - **Best for**: Identifying what the illustrator emphasized — typically flowers,
+      fruits, or other diagnostic structures.
 
-    ### Color Representations
-    All colors are provided in three color spaces:
-    - **RGB**: Standard red-green-blue (0-255 per channel)
-    - **HSL**: Hue (0-360°), Saturation (0-100%), Lightness (0-100%)
-    - **LAB**: CIE L\\*a\\*b\\* perceptually uniform color space
-      - L: Lightness (0-100)
-      - a: Green (-) to Red (+) axis
-      - b: Blue (-) to Yellow (+) axis
+    ### Which ranking to use?
 
-    ### Which Ranking to Use?
+    | Ranking | Question it answers |
+    |---|---|
+    | Frequency | "What colors dominate this plant?" |
+    | Botanical Contrast | "What colors pop out of the green/brown background?" |
+    | Perceptual | "What colors are intrinsically striking?" |
+    | Salience | "What would I notice first when looking at this?" |
 
-    - **Frequency**: "What colors make up most of this plant?"
-    - **Perceptual**: "What colors are intrinsically striking?"
-    - **Salience**: "What colors would I notice first when looking at this?"
-
-    For botanical analysis, **salience** often works best as it captures what the
-    illustrator emphasized - typically the diagnostic features like flowers or fruits.
+    For finding characteristic flower or fruit colors, **Botanical Contrast** is usually
+    the most useful. For understanding the full illustration composition, use **Frequency**.
     """)
 
 # Load cluster data
