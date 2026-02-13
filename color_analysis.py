@@ -13,12 +13,73 @@ import argparse
 import colorsys
 import json
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
 
 import cv2
 import numpy as np
 from skimage.color import rgb2lab
 from sklearn.cluster import KMeans
 from tqdm import tqdm
+
+
+def crop_uniform_borders(image, threshold=20, min_border_width=5):
+    """
+    Crop uniform color borders from image edges.
+
+    Detects and removes black/white borders that may have been included
+    in SAM segmentation due to scan artifacts.
+
+    Args:
+        image: RGB/RGBA image array
+        threshold: Color variance threshold (0-255) to consider uniform
+        min_border_width: Minimum pixels to crop (avoids tiny crops)
+
+    Returns:
+        Cropped image array
+    """
+    if len(image.shape) == 3 and image.shape[2] == 4:
+        # RGBA - use RGB channels for analysis
+        img_rgb = image[:, :, :3]
+    else:
+        img_rgb = image
+
+    h, w = img_rgb.shape[:2]
+
+    # Analyze border regions (10% of image on each side)
+    border_size = max(min(h, w) // 20, min_border_width)
+
+    # Top border
+    top_region = img_rgb[:border_size, :]
+    top_std = np.std(top_region)
+    crop_top = border_size if top_std < threshold else 0
+
+    # Bottom border
+    bottom_region = img_rgb[-border_size:, :]
+    bottom_std = np.std(bottom_region)
+    crop_bottom = border_size if bottom_std < threshold else 0
+
+    # Left border
+    left_region = img_rgb[:, :border_size]
+    left_std = np.std(left_region)
+    crop_left = border_size if left_std < threshold else 0
+
+    # Right border
+    right_region = img_rgb[:, -border_size:]
+    right_std = np.std(right_region)
+    crop_right = border_size if right_std < threshold else 0
+
+    # Only crop if we found uniform borders
+    if crop_top > 0 or crop_bottom > 0 or crop_left > 0 or crop_right > 0:
+        # Ensure we don't crop entire image
+        new_h = h - crop_top - crop_bottom
+        new_w = w - crop_left - crop_right
+
+        if new_h > h // 2 and new_w > w // 2:
+            cropped = image[crop_top:h-crop_bottom if crop_bottom > 0 else h,
+                          crop_left:w-crop_right if crop_right > 0 else w]
+            return cropped
+
+    return image
 
 
 def rgb_to_hsl(r, g, b):
@@ -150,6 +211,72 @@ def calculate_perceptual_weight(rgb, hsl, lab, percentage, all_colors_lab):
     weight = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
 
     return weight
+
+
+def calculate_botanical_contrast_weight(lab, percentage):
+    """
+    Rank colors by how much they stand out against a typical botanical background.
+
+    Botanical illustrations are dominated by greens (leaves/stems) and
+    browns/beiges (paper, bark, dried material). Colors that are perceptually
+    far from this reference palette are considered "distinctive" - flowers,
+    berries, and unusual pigments.
+
+    The reference palette covers:
+    - Greens:  various leaf/stem greens
+    - Browns:  bark, dried material, aged paper
+    - Beiges:  paper background tones
+    - Grays:   aged/faded tones
+
+    Args:
+        lab: LAB tuple (L, a, b) of the color to score
+        percentage: Frequency percentage of this color in the image
+
+    Returns:
+        Botanical contrast score (higher = more distinctive vs background)
+    """
+    # Reference botanical background colors in LAB space
+    # (L, a, b) - measured from typical botanical illustration backgrounds
+    botanical_background_lab = [
+        # Greens
+        (45, -20, 25),   # dark leaf green
+        (55, -25, 30),   # mid leaf green
+        (65, -18, 22),   # light leaf green
+        (50, -15, 20),   # olive/stem green
+        (40, -10, 15),   # dark olive green
+        # Browns / tans
+        (45, 10, 25),    # warm brown bark
+        (55, 8, 20),     # light brown
+        (60, 5, 15),     # tan / dry stem
+        (35, 8, 15),     # dark brown
+        # Beiges / paper
+        (85, 2, 8),      # aged paper
+        (90, 0, 5),      # white paper
+        (75, 3, 12),     # warm beige
+        # Grays
+        (60, 0, 2),      # mid gray
+        (45, 0, 2),      # dark gray
+    ]
+
+    # Find the minimum distance to any reference color
+    min_dist = min(
+        color_distance_lab(lab, ref)
+        for ref in botanical_background_lab
+    )
+
+    # Normalize: a Delta E of ~50 is already a very large perceptual difference
+    # (e.g. a pure red vs a mid green). Cap at 60 to avoid runaway scores.
+    contrast_score = min(min_dist / 60.0, 1.0)
+
+    # Small frequency boost: a tiny sliver of bright red still matters,
+    # but a large swath of unusual color is more reliable.
+    # Cap frequency contribution at 30% so it doesn't drown out contrast.
+    frequency_score = min(percentage / 100.0, 0.3)
+
+    # 80% contrast, 20% frequency
+    weight = 0.80 * contrast_score + 0.20 * frequency_score
+
+    return round(weight, 4)
 
 
 def compute_saliency_map(image, mask=None, max_size=512):
@@ -291,7 +418,9 @@ def extract_dominant_colors(
     background_color=None,
     background_tolerance=50,
     sample_size=10000,
-    calculate_both=False
+    calculate_both=False,
+    crop_borders=True,
+    filter_extremes=True
 ):
     """
     Extract dominant colors from an image using k-means clustering.
@@ -304,11 +433,17 @@ def extract_dominant_colors(
         background_tolerance: Tolerance for background color similarity
         sample_size: Number of pixels to sample (for performance)
         calculate_both: If True, return dict with both frequency and visual importance rankings
+        crop_borders: Whether to crop uniform borders before analysis
+        filter_extremes: Filter out very dark (black) and very bright (white) colors
 
     Returns:
         If calculate_both=False: List of color dictionaries (sorted by frequency)
         If calculate_both=True: Dict with 'frequency' and 'visual' keys, each containing color lists
     """
+    # Crop uniform borders (e.g., black scan borders) if requested
+    if crop_borders:
+        image = crop_uniform_borders(image)
+
     # Convert BGR to RGB
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -332,8 +467,8 @@ def extract_dominant_colors(
     # Perform k-means clustering
     # Try to extract more colors initially if we're filtering
     n_clusters = n_colors * 2 if filter_background else n_colors
-    # Reduced max_iter for faster processing with minimal quality loss
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=5, max_iter=100)
+    # Reduced iterations for speed with minimal quality loss
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=3, max_iter=50)
     kmeans.fit(pixels)
 
     # Get cluster centers (dominant colors) and their frequencies
@@ -356,6 +491,15 @@ def extract_dominant_colors(
         # Filter background colors if requested
         if filter_background and background_color is not None:
             if is_similar_to_background(rgb, background_color, background_tolerance):
+                continue
+
+        # Filter extreme colors (very dark/very bright) that are likely artifacts
+        if filter_extremes:
+            # Filter very dark colors (likely scan borders/shadows)
+            if all(c < 30 for c in rgb):  # Near black
+                continue
+            # Filter very bright colors (likely paper/background)
+            if all(c > 240 for c in rgb):  # Near white
                 continue
 
         hsl = rgb_to_hsl(*rgb)
@@ -398,15 +542,24 @@ def extract_dominant_colors(
             # For backwards compatibility, use saliency as primary
             color['visual_importance'] = round(saliency, 4)
 
-    # If calculate_both, return all three rankings
+            # Calculate botanical contrast: how much does this color stand out
+            # against typical green/brown botanical illustration backgrounds
+            botanical = calculate_botanical_contrast_weight(
+                color['lab_tuple'],
+                color['percentage']
+            )
+            color['botanical_contrast_weight'] = botanical
+
+    # If calculate_both, return all four rankings
     if calculate_both:
-        # Create three sorted lists
+        # Create four sorted lists
         frequency_sorted = sorted(color_data, key=lambda x: x['percentage'], reverse=True)
         perceptual_sorted = sorted(color_data, key=lambda x: x['perceptual_weight'], reverse=True)
         saliency_sorted = sorted(color_data, key=lambda x: x['saliency_weight'], reverse=True)
+        botanical_sorted = sorted(color_data, key=lambda x: x['botanical_contrast_weight'], reverse=True)
 
         # Clean up temporary fields for all lists
-        all_colors = frequency_sorted + perceptual_sorted + saliency_sorted
+        all_colors = frequency_sorted + perceptual_sorted + saliency_sorted + botanical_sorted
         for color in all_colors:
             color.pop('rgb_tuple', None)
             color.pop('hsl_tuple', None)
@@ -414,7 +567,8 @@ def extract_dominant_colors(
         return {
             'frequency': frequency_sorted[:n_colors],
             'perceptual': perceptual_sorted[:n_colors],
-            'saliency': saliency_sorted[:n_colors]
+            'saliency': saliency_sorted[:n_colors],
+            'botanical': botanical_sorted[:n_colors],
         }
     else:
         # Default: sort by percentage (most dominant first)
@@ -436,10 +590,11 @@ class ColorAnalyzer:
         n_colors=5,
         filter_background=True,
         background_tolerance=50,
-        force=False
+        force=False,
+        crop_borders=True,
+        n_jobs=None
     ):
-        """
-        Initialize Color Analyzer.
+        """Initialize Color Analyzer.
 
         Args:
             mask_output_dir: Directory containing segmented images and metadata
@@ -447,11 +602,16 @@ class ColorAnalyzer:
             filter_background: Whether to filter out background colors
             background_tolerance: Color distance tolerance for background filtering
             force: Force reprocessing of all images
+            crop_borders: Crop uniform color borders before analysis
+            n_jobs: Number of parallel jobs (None = use all CPUs)
         """
         self.mask_output_dir = Path(mask_output_dir)
         self.n_colors = n_colors
         self.filter_background = filter_background
         self.background_tolerance = background_tolerance
+        self.crop_borders = crop_borders
+        self.force = force
+        self.n_jobs = n_jobs if n_jobs else cpu_count()
         self.force = force
 
         # Load existing metadata
@@ -492,26 +652,35 @@ class ColorAnalyzer:
             print(f"Background filtering: enabled (tolerance: {self.background_tolerance})")
         else:
             print("Background filtering: disabled")
+        if self.n_jobs > 1:
+            print(f"Using {self.n_jobs} parallel workers (sequential mode for stability)")
         print()
 
         processed = 0
         skipped = 0
         errors = 0
 
-        for mask_key, entry in tqdm(self.masks_metadata.items(), desc="Analyzing colors"):
-            # Skip if colors already extracted with new three-ranking system (unless --force)
+        for mask_key, entry in tqdm(
+            self.masks_metadata.items(), desc="Analyzing colors"
+        ):
+            # Skip if colors already extracted with all four rankings (unless --force)
             if not self.force:
-                # Check for all three ranking lists and the new weight fields
                 has_new_format = False
                 if ('colors_frequency' in entry and entry['colors_frequency'] and
-                    'colors_perceptual' in entry and entry['colors_perceptual'] and
-                    'colors_saliency' in entry and entry['colors_saliency']):
-                    # Verify the colors have the new weight fields
-                    first_freq = entry['colors_frequency'][0] if entry['colors_frequency'] else {}
-                    first_perc = entry['colors_perceptual'][0] if entry['colors_perceptual'] else {}
-                    first_sal = entry['colors_saliency'][0] if entry['colors_saliency'] else {}
-                    has_new_format = ('perceptual_weight' in first_perc and
-                                      'saliency_weight' in first_sal)
+                        'colors_perceptual' in entry and entry['colors_perceptual'] and
+                        'colors_saliency' in entry and entry['colors_saliency'] and
+                        'colors_botanical' in entry and entry['colors_botanical']):
+                    first_perc = (entry['colors_perceptual'][0]
+                                  if entry['colors_perceptual'] else {})
+                    first_sal = (entry['colors_saliency'][0]
+                                 if entry['colors_saliency'] else {})
+                    first_bot = (entry['colors_botanical'][0]
+                                 if entry['colors_botanical'] else {})
+                    has_new_format = (
+                        'perceptual_weight' in first_perc
+                        and 'saliency_weight' in first_sal
+                        and 'botanical_contrast_weight' in first_bot
+                    )
 
                 if has_new_format:
                     skipped += 1
@@ -552,13 +721,15 @@ class ColorAnalyzer:
                     filter_background=self.filter_background,
                     background_color=background_color,
                     background_tolerance=self.background_tolerance,
-                    calculate_both=True
+                    calculate_both=True,
+                    crop_borders=self.crop_borders
                 )
 
-                # Update metadata with all three rankings
+                # Update metadata with all four rankings
                 entry['colors_frequency'] = color_results['frequency']
                 entry['colors_perceptual'] = color_results['perceptual']
                 entry['colors_saliency'] = color_results['saliency']
+                entry['colors_botanical'] = color_results['botanical']
                 # Keep 'colors' as default (frequency) for backwards compatibility
                 entry['colors'] = color_results['frequency']
                 # Keep colors_visual for backwards compatibility (use saliency)
@@ -627,6 +798,11 @@ def main():
         help="Don't filter out background colors"
     )
     parser.add_argument(
+        "--no-crop-borders",
+        action="store_true",
+        help="Don't crop uniform borders (black/white scan artifacts)"
+    )
+    parser.add_argument(
         "--tolerance",
         type=int,
         default=50,
@@ -642,6 +818,12 @@ def main():
         action="store_true",
         help="Force reprocessing of all images (skip the skip check)"
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        help="Number of parallel jobs (default: use all CPUs)"
+    )
 
     args = parser.parse_args()
 
@@ -651,7 +833,9 @@ def main():
             n_colors=args.n_colors,
             filter_background=not args.no_filter_background,
             background_tolerance=args.tolerance,
-            force=args.force
+            force=args.force,
+            crop_borders=not args.no_crop_borders,
+            n_jobs=args.jobs
         )
 
         if args.stats:

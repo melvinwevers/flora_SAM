@@ -46,8 +46,20 @@ st.sidebar.header("Display Options")
 # Color ranking toggle
 color_ranking = st.sidebar.radio(
     "Color Ranking",
-    options=["frequency", "perceptual", "saliency"],
-    format_func=lambda x: {"frequency": "Frequency", "perceptual": "Perceptual", "saliency": "Salience"}[x]
+    options=["frequency", "botanical", "perceptual", "saliency"],
+    format_func=lambda x: {
+        "frequency": "Frequency",
+        "botanical": "Botanical Contrast",
+        "perceptual": "Perceptual",
+        "saliency": "Salience",
+    }[x],
+    help=(
+        "**Frequency** — most area coverage.\n\n"
+        "**Botanical Contrast** — colors that pop against green/brown backgrounds "
+        "(flowers, berries, unusual pigments).\n\n"
+        "**Perceptual** — balances area, saturation, and image contrast.\n\n"
+        "**Salience** — colors in visually prominent regions."
+    )
 )
 
 num_colors = 5

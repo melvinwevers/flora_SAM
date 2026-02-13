@@ -64,9 +64,21 @@ col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
     color_ranking = st.radio(
         "Color Ranking",
-        options=["frequency", "perceptual", "saliency"],
-        format_func=lambda x: {"frequency": "Frequency", "perceptual": "Perceptual", "saliency": "Salience"}[x],
-        horizontal=True
+        options=["frequency", "botanical", "perceptual", "saliency"],
+        format_func=lambda x: {
+            "frequency": "Frequency",
+            "botanical": "Botanical Contrast",
+            "perceptual": "Perceptual",
+            "saliency": "Salience",
+        }[x],
+        horizontal=True,
+        help=(
+            "**Frequency** — most area coverage.\n\n"
+            "**Botanical Contrast** — colors that pop against green/brown backgrounds "
+            "(flowers, berries, unusual pigments).\n\n"
+            "**Perceptual** — balances area, saturation, and image contrast.\n\n"
+            "**Salience** — colors in visually prominent regions."
+        )
     )
 
 with col2:

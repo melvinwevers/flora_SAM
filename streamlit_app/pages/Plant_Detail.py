@@ -73,27 +73,35 @@ with col2:
 # Color palettes
 st.header("Color Palettes")
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.subheader("Frequency")
-    st.caption("By area coverage")
+    st.caption("Most area coverage")
 
     colors_freq = data_loader.get_color_palette(plant_id, ranking='frequency')
     if colors_freq:
         st.markdown(charts.create_color_palette_display(colors_freq), unsafe_allow_html=True)
 
 with col2:
+    st.subheader("Botanical Contrast")
+    st.caption("Pops against green/brown — flowers, berries, unusual pigments")
+
+    colors_botanical = data_loader.get_color_palette(plant_id, ranking='botanical')
+    if colors_botanical:
+        st.markdown(charts.create_color_palette_display(colors_botanical), unsafe_allow_html=True)
+
+with col3:
     st.subheader("Perceptual")
-    st.caption("By color properties")
+    st.caption("Balances area, saturation, and contrast")
 
     colors_perceptual = data_loader.get_color_palette(plant_id, ranking='perceptual')
     if colors_perceptual:
         st.markdown(charts.create_color_palette_display(colors_perceptual), unsafe_allow_html=True)
 
-with col3:
+with col4:
     st.subheader("Salience")
-    st.caption("By spatial attention")
+    st.caption("Colors in visually prominent regions")
 
     colors_saliency = data_loader.get_color_palette(plant_id, ranking='saliency')
     if colors_saliency:

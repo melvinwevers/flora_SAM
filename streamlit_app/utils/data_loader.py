@@ -173,6 +173,7 @@ def get_color_palette(plant_id, ranking='frequency'):
         'frequency': 'color_freq',
         'perceptual': 'color_perceptual',
         'saliency': 'color_saliency',
+        'botanical': 'color_botanical',
         'visual': 'color_visual'  # backwards compatibility
     }
 
