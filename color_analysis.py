@@ -413,7 +413,7 @@ def calculate_saliency_weight(saliency_map, image_rgb, rgb):
 
 def extract_dominant_colors(
     image,
-    n_colors=5,
+    n_colors=10,
     filter_background=True,
     background_color=None,
     background_tolerance=50,
@@ -587,7 +587,7 @@ class ColorAnalyzer:
     def __init__(
         self,
         mask_output_dir,
-        n_colors=5,
+        n_colors=10,
         filter_background=True,
         background_tolerance=50,
         force=False,
@@ -789,8 +789,8 @@ def main():
     parser.add_argument(
         "--n-colors",
         type=int,
-        default=5,
-        help="Number of dominant colors to extract (default: 5)"
+        default=10,
+        help="Number of dominant colors to extract (default: 10)"
     )
     parser.add_argument(
         "--no-filter-background",
