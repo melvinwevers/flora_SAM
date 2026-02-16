@@ -135,7 +135,9 @@ with st.expander("How are colors ranked?"):
     are clustered. Pixels with LAB chroma ≤ 15 (paper, beige, gray, dark brown) are
     excluded before clustering, so even tiny areas of vivid color form their own cluster.
     - **Process**: Filter pixels to LAB chroma > 15, run K-means on the remainder, sort
-      clusters by their center chroma (most vivid first).
+      clusters by **botanical contrast** (same formula as ranking 2) so that unusual
+      pigments like purple flowers rank above common leaf-yellows that happen to have
+      high raw chroma.
     - **Best for**: Reliably surfacing small but vividly colored features — a single red
       flower or a cluster of blue berries — that would be invisible in Frequency ranking
       because they represent less than 1% of all pixels.
