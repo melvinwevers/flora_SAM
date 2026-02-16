@@ -57,6 +57,8 @@ checkpoints/
 *.png
 *.jpg
 *.jpeg
+# But keep app thumbnails
+!streamlit_app/thumbnails/*.jpg
 
 # Metadata files (but keep package configs)
 all_segments_metadata.json

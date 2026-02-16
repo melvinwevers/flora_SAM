@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from tqdm import tqdm
 
-THUMB_WIDTH = 300
+THUMB_WIDTH = 400
 INPUT_DIR = Path("masks/")
 OUTPUT_DIR = Path("streamlit_app/thumbnails/")
 
@@ -56,7 +56,7 @@ def generate_thumbnails():
             output_path = OUTPUT_DIR / thumb_name
 
             # Save as JPEG with good quality
-            thumb.save(output_path, "JPEG", quality=85, optimize=True)
+            thumb.save(output_path, "JPEG", quality=90, optimize=True)
             success_count += 1
 
         except Exception as e:
