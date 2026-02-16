@@ -18,7 +18,7 @@ from multiprocessing import Pool, cpu_count
 import cv2
 import numpy as np
 from skimage.color import rgb2lab
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
 from tqdm import tqdm
 
 
@@ -454,7 +454,9 @@ def extract_dominant_colors(
 
     if len(pixels) == 0:
         print("Warning: No non-zero pixels found in image")
-        return []
+        empty = {'frequency': [], 'perceptual': [], 'saliency': [],
+                 'botanical': [], 'chroma': []}
+        return empty if calculate_both else []
 
     total_pixels_full = len(pixels)
 
@@ -477,8 +479,8 @@ def extract_dominant_colors(
         )
         chroma_sample = chromatic_pixels[chroma_idx].reshape(-1, 3)
         n_chroma_clusters = min(n_colors * 2, len(chromatic_pixels))
-        chroma_kmeans = KMeans(
-            n_clusters=n_chroma_clusters, random_state=42, n_init=3, max_iter=50
+        chroma_kmeans = MiniBatchKMeans(
+            n_clusters=n_chroma_clusters, random_state=42, n_init=3, max_iter=100
         )
         chroma_kmeans.fit(chroma_sample)
         chroma_centers = chroma_kmeans.cluster_centers_.astype(int)
@@ -506,7 +508,7 @@ def extract_dominant_colors(
     # Try to extract more colors initially if we're filtering
     n_clusters = n_colors * 2 if filter_background else n_colors
     # Reduced iterations for speed with minimal quality loss
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=3, max_iter=50)
+    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, n_init=3, max_iter=100)
     kmeans.fit(pixels)
 
     # Get cluster centers (dominant colors) and their frequencies
@@ -674,6 +676,38 @@ def extract_dominant_colors(
         return color_data[:n_colors]
 
 
+def _process_single_image(args):
+    """Module-level worker for multiprocessing.Pool (must be picklable)."""
+    (mask_key, segmented_path, background_color,
+     n_colors, filter_background, background_tolerance, crop_borders) = args
+
+    # One OpenCV thread per worker avoids CPU contention across processes
+    cv2.setNumThreads(1)
+
+    try:
+        image = cv2.imread(str(segmented_path), cv2.IMREAD_UNCHANGED)
+        if image is None:
+            return (mask_key, None, f"Could not load {segmented_path}")
+
+        if image.ndim == 3 and image.shape[2] == 4:
+            alpha = image[:, :, 3]
+            image[alpha < 10] = 0
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+
+        color_results = extract_dominant_colors(
+            image,
+            n_colors=n_colors,
+            filter_background=filter_background,
+            background_color=background_color,
+            background_tolerance=background_tolerance,
+            calculate_both=True,
+            crop_borders=crop_borders,
+        )
+        return (mask_key, color_results, None)
+    except Exception as e:
+        return (mask_key, None, str(e))
+
+
 class ColorAnalyzer:
     def __init__(
         self,
@@ -750,11 +784,11 @@ class ColorAnalyzer:
         processed = 0
         skipped = 0
         errors = 0
+        save_interval = 200  # save progress every N completed images
 
-        for mask_key, entry in tqdm(
-            self.masks_metadata.items(), desc="Analyzing colors"
-        ):
-            # Skip if all five rankings already extracted (unless --force)
+        # Build work list (skip already-done entries)
+        work_items = []
+        for mask_key, entry in self.masks_metadata.items():
             if not self.force:
                 has_new_format = (
                     entry.get('colors_frequency')
@@ -769,7 +803,6 @@ class ColorAnalyzer:
                     skipped += 1
                     continue
 
-            # Get segmented image path
             segmented_file = entry.get('segmented_file')
             if not segmented_file:
                 print(f"Warning: No segmented_file in entry {mask_key}")
@@ -777,67 +810,50 @@ class ColorAnalyzer:
                 continue
 
             segmented_path = self.mask_output_dir / segmented_file
-
             if not segmented_path.exists():
                 print(f"Warning: Segmented image not found: {segmented_path}")
                 errors += 1
                 continue
 
-            try:
-                # Load segmented image with alpha so transparent background
-                # pixels (which may have non-zero RGB) are correctly excluded.
-                image = cv2.imread(str(segmented_path), cv2.IMREAD_UNCHANGED)
+            background_color = entry.get('background_color_rgb')
+            if background_color and isinstance(background_color, list):
+                background_color = tuple(background_color)
 
-                if image is None:
-                    print(f"Warning: Could not load image {segmented_path}")
+            work_items.append((
+                mask_key, segmented_path, background_color,
+                self.n_colors, self.filter_background,
+                self.background_tolerance, self.crop_borders,
+            ))
+
+        print(f"Work items to process: {len(work_items)}  (skipped: {skipped})")
+
+        with Pool(processes=self.n_jobs) as pool:
+            for mask_key, color_results, error in tqdm(
+                pool.imap_unordered(_process_single_image, work_items),
+                total=len(work_items),
+                desc="Analyzing colors",
+            ):
+                if error or not isinstance(color_results, dict) or not color_results.get('frequency'):
+                    print(f"\nError processing {mask_key}: {error}")
                     errors += 1
                     continue
 
-                # If the image has an alpha channel, zero out transparent pixels
-                # before analysis so they are excluded by the non-black mask in
-                # extract_dominant_colors.  Without this, background pixels with
-                # near-black (but non-zero) RGB values inflate pixel counts and
-                # dilute the real plant-pixel percentages.
-                if image.ndim == 3 and image.shape[2] == 4:
-                    alpha = image[:, :, 3]
-                    image[alpha < 10] = 0
-                    image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-
-                # Get background color from metadata if available
-                background_color = entry.get('background_color_rgb')
-                if background_color and isinstance(background_color, list):
-                    background_color = tuple(background_color)
-
-                # Extract colors (both ranking methods)
-                color_results = extract_dominant_colors(
-                    image,
-                    n_colors=self.n_colors,
-                    filter_background=self.filter_background,
-                    background_color=background_color,
-                    background_tolerance=self.background_tolerance,
-                    calculate_both=True,
-                    crop_borders=self.crop_borders
-                )
-
-                # Update metadata with all five rankings
+                entry = self.masks_metadata[mask_key]
                 entry['colors_frequency'] = color_results['frequency']
                 entry['colors_perceptual'] = color_results['perceptual']
                 entry['colors_saliency'] = color_results['saliency']
                 entry['colors_botanical'] = color_results['botanical']
                 entry['colors_chroma'] = color_results['chroma']
-                # Keep 'colors' as default (frequency) for backwards compatibility
                 entry['colors'] = color_results['frequency']
-                # Keep colors_visual for backwards compatibility (use saliency)
                 entry['colors_visual'] = color_results['saliency']
                 entry['n_colors_extracted'] = len(color_results['frequency'])
-
                 processed += 1
 
-            except Exception as e:
-                print(f"Error processing {segmented_file}: {e}")
-                errors += 1
+                if processed % save_interval == 0:
+                    self.save_metadata()
+                    print(f"\n  [checkpoint] saved {processed} / {len(work_items)}")
 
-        # Save updated metadata
+        # Final save
         self.save_metadata()
 
         # Print summary
