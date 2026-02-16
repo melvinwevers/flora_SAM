@@ -73,7 +73,7 @@ with col2:
 # Color palettes
 st.header("Color Palettes")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.subheader("Frequency")
@@ -106,6 +106,14 @@ with col4:
     colors_saliency = data_loader.get_color_palette(plant_id, ranking='saliency')
     if colors_saliency:
         st.markdown(charts.create_color_palette_display(colors_saliency), unsafe_allow_html=True)
+
+with col5:
+    st.subheader("Dominant Pigments")
+    st.caption("Vivid pigments only — neutral paper/beige removed")
+
+    colors_chroma = data_loader.get_color_palette(plant_id, ranking='chroma')
+    if colors_chroma:
+        st.markdown(charts.create_color_palette_display(colors_chroma), unsafe_allow_html=True)
 
 # Cluster membership
 st.header("Visual Cluster Membership")

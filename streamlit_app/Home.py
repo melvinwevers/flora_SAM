@@ -100,7 +100,7 @@ Use the sidebar to navigate between different views, or use the search above to 
 
 with st.expander("How are colors ranked?"):
     st.markdown("""
-    The app provides **four different color rankings** for each plant:
+    The app provides **five different color rankings** for each plant:
 
     ### 1. Frequency
     Colors sorted by **area coverage** — the most common color first.
@@ -130,6 +130,16 @@ with st.expander("How are colors ranked?"):
     - **Best for**: Identifying what the illustrator emphasized — typically flowers,
       fruits, or other diagnostic structures.
 
+    ### 5. Dominant Pigments
+    Colors extracted by **chroma-filtered K-means** — only chromatic (non-neutral) pixels
+    are clustered. Pixels with LAB chroma ≤ 15 (paper, beige, gray, dark brown) are
+    excluded before clustering, so even tiny areas of vivid color form their own cluster.
+    - **Process**: Filter pixels to LAB chroma > 15, run K-means on the remainder, sort
+      clusters by their center chroma (most vivid first).
+    - **Best for**: Reliably surfacing small but vividly colored features — a single red
+      flower or a cluster of blue berries — that would be invisible in Frequency ranking
+      because they represent less than 1% of all pixels.
+
     ### Which ranking to use?
 
     | Ranking | Question it answers |
@@ -138,9 +148,11 @@ with st.expander("How are colors ranked?"):
     | Botanical Contrast | "What colors pop out of the green/brown background?" |
     | Perceptual | "What colors are intrinsically striking?" |
     | Salience | "What would I notice first when looking at this?" |
+    | Dominant Pigments | "What vivid colors are present, even if rare?" |
 
-    For finding characteristic flower or fruit colors, **Botanical Contrast** is usually
-    the most useful. For understanding the full illustration composition, use **Frequency**.
+    For finding characteristic flower or fruit colors, **Dominant Pigments** or
+    **Botanical Contrast** are usually the most useful. For understanding the full
+    illustration composition, use **Frequency**.
     """)
 
 # Load cluster data

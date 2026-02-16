@@ -456,7 +456,45 @@ def extract_dominant_colors(
         print("Warning: No non-zero pixels found in image")
         return []
 
-    # Sample pixels if there are too many (for performance)
+    total_pixels_full = len(pixels)
+
+    # --- Chroma pass: K-means on only chromatic (non-neutral) pixels ---
+    # Filters to LAB chroma = √(a²+b²) > 15, removing paper, beige, and
+    # neutral grays. This makes rare coloured features (e.g. 0.3% terracotta
+    # flowers) a significant fraction of the remaining pixels so K-means
+    # reliably allocates them their own cluster.
+    pixels_lab_all = rgb2lab(
+        (pixels.astype(np.float32) / 255.0).reshape(-1, 1, 3)
+    ).reshape(-1, 3)
+    chroma_all = np.sqrt(pixels_lab_all[:, 1] ** 2 + pixels_lab_all[:, 2] ** 2)
+    chromatic_mask = chroma_all > 15.0
+    chromatic_pixels = pixels[chromatic_mask]
+
+    if len(chromatic_pixels) >= n_colors:
+        chroma_sample_size = min(len(chromatic_pixels), sample_size)
+        chroma_idx = np.random.choice(
+            len(chromatic_pixels), chroma_sample_size, replace=False
+        )
+        chroma_sample = chromatic_pixels[chroma_idx].reshape(-1, 3)
+        n_chroma_clusters = min(n_colors * 2, len(chromatic_pixels))
+        chroma_kmeans = KMeans(
+            n_clusters=n_chroma_clusters, random_state=42, n_init=3, max_iter=50
+        )
+        chroma_kmeans.fit(chroma_sample)
+        chroma_centers = chroma_kmeans.cluster_centers_.astype(int)
+        # Count across ALL chromatic pixels for real image percentages
+        chroma_diffs = (
+            chromatic_pixels[:, np.newaxis, :].astype(float)
+            - chroma_centers[np.newaxis, :, :]
+        )
+        chroma_assign = np.sqrt((chroma_diffs ** 2).sum(axis=2)).argmin(axis=1)
+        chroma_counts = np.zeros(len(chroma_centers), dtype=int)
+        for lbl, cnt in zip(*np.unique(chroma_assign, return_counts=True)):
+            chroma_counts[lbl] = cnt
+    else:
+        chroma_centers = None
+
+    # --- Regular uniform sample for frequency / perceptual / saliency ---
     if len(pixels) > sample_size:
         indices = np.random.choice(len(pixels), sample_size, replace=False)
         pixels = pixels[indices]
@@ -550,25 +588,74 @@ def extract_dominant_colors(
             )
             color['botanical_contrast_weight'] = botanical
 
-    # If calculate_both, return all four rankings
+    # If calculate_both, return all rankings
     if calculate_both:
-        # Create four sorted lists
-        frequency_sorted = sorted(color_data, key=lambda x: x['percentage'], reverse=True)
-        perceptual_sorted = sorted(color_data, key=lambda x: x['perceptual_weight'], reverse=True)
-        saliency_sorted = sorted(color_data, key=lambda x: x['saliency_weight'], reverse=True)
-        botanical_sorted = sorted(color_data, key=lambda x: x['botanical_contrast_weight'], reverse=True)
+        # Three sorted lists from regular K-means
+        frequency_sorted = sorted(
+            color_data, key=lambda x: x['percentage'], reverse=True
+        )
+        perceptual_sorted = sorted(
+            color_data, key=lambda x: x['perceptual_weight'], reverse=True
+        )
+        saliency_sorted = sorted(
+            color_data, key=lambda x: x['saliency_weight'], reverse=True
+        )
+        botanical_sorted = sorted(
+            color_data,
+            key=lambda x: x['botanical_contrast_weight'],
+            reverse=True,
+        )
 
-        # Clean up temporary fields for all lists
-        all_colors = frequency_sorted + perceptual_sorted + saliency_sorted + botanical_sorted
-        for color in all_colors:
+        for color in (
+            frequency_sorted + perceptual_sorted
+            + saliency_sorted + botanical_sorted
+        ):
             color.pop('rgb_tuple', None)
             color.pop('hsl_tuple', None)
+
+        # Chroma ranking: K-means on LAB-chroma > 15 pixels only.
+        # Neutral paper/beige/gray is removed before clustering so rare
+        # coloured features (small flowers, berries) are never swamped by
+        # the dominant background and always form their own cluster.
+        # Sorted by chroma of each cluster center (most vivid pigment first).
+        if chroma_centers is not None:
+            chroma_color_data = []
+            for i, rgb in enumerate(chroma_centers):
+                rgb = tuple(int(v) for v in rgb)
+                count = int(chroma_counts[i])
+                pct = round(count / total_pixels_full * 100, 2)
+
+                if filter_extremes:
+                    if all(c < 30 for c in rgb):
+                        continue
+                    if all(c > 240 for c in rgb):
+                        continue
+
+                hsl = rgb_to_hsl(*rgb)
+                lab = rgb_to_lab(*rgb)
+                center_chroma = (lab[1] ** 2 + lab[2] ** 2) ** 0.5
+
+                chroma_color_data.append({
+                    'rgb': list(rgb),
+                    'hsl': [int(hsl[0]), int(hsl[1]), int(hsl[2])],
+                    'lab': lab,
+                    'percentage': pct,
+                    'hex': '#{:02x}{:02x}{:02x}'.format(*rgb),
+                    'chroma': round(center_chroma, 2),
+                })
+
+            chroma_sorted = sorted(
+                chroma_color_data, key=lambda x: x['chroma'], reverse=True
+            )[:n_colors]
+        else:
+            chroma_sorted = frequency_sorted[:n_colors]
 
         return {
             'frequency': frequency_sorted[:n_colors],
             'perceptual': perceptual_sorted[:n_colors],
             'saliency': saliency_sorted[:n_colors],
             'botanical': botanical_sorted[:n_colors],
+            'chroma': chroma_sorted,
         }
     else:
         # Default: sort by percentage (most dominant first)
@@ -663,25 +750,17 @@ class ColorAnalyzer:
         for mask_key, entry in tqdm(
             self.masks_metadata.items(), desc="Analyzing colors"
         ):
-            # Skip if colors already extracted with all four rankings (unless --force)
+            # Skip if all five rankings already extracted (unless --force)
             if not self.force:
-                has_new_format = False
-                if ('colors_frequency' in entry and entry['colors_frequency'] and
-                        'colors_perceptual' in entry and entry['colors_perceptual'] and
-                        'colors_saliency' in entry and entry['colors_saliency'] and
-                        'colors_botanical' in entry and entry['colors_botanical']):
-                    first_perc = (entry['colors_perceptual'][0]
-                                  if entry['colors_perceptual'] else {})
-                    first_sal = (entry['colors_saliency'][0]
-                                 if entry['colors_saliency'] else {})
-                    first_bot = (entry['colors_botanical'][0]
-                                 if entry['colors_botanical'] else {})
-                    has_new_format = (
-                        'perceptual_weight' in first_perc
-                        and 'saliency_weight' in first_sal
-                        and 'botanical_contrast_weight' in first_bot
-                    )
-
+                has_new_format = (
+                    entry.get('colors_frequency')
+                    and entry.get('colors_perceptual')
+                    and entry.get('colors_saliency')
+                    and entry.get('colors_botanical')
+                    and entry.get('colors_chroma')
+                    and 'chroma' in (entry['colors_chroma'][0]
+                                     if entry.get('colors_chroma') else {})
+                )
                 if has_new_format:
                     skipped += 1
                     continue
@@ -725,11 +804,12 @@ class ColorAnalyzer:
                     crop_borders=self.crop_borders
                 )
 
-                # Update metadata with all four rankings
+                # Update metadata with all five rankings
                 entry['colors_frequency'] = color_results['frequency']
                 entry['colors_perceptual'] = color_results['perceptual']
                 entry['colors_saliency'] = color_results['saliency']
                 entry['colors_botanical'] = color_results['botanical']
+                entry['colors_chroma'] = color_results['chroma']
                 # Keep 'colors' as default (frequency) for backwards compatibility
                 entry['colors'] = color_results['frequency']
                 # Keep colors_visual for backwards compatibility (use saliency)

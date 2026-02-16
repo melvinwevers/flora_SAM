@@ -40,11 +40,12 @@ def create_plants_metadata_csv(masks_meta):
         if plant_id.endswith('.tif'):
             plant_id = plant_id[:-4]
 
-        # Extract top 5 colors from all four rankings
+        # Extract top 5 colors from all five rankings
         colors_freq = entry.get('colors_frequency', [])[:5]
         colors_perceptual = entry.get('colors_perceptual', [])[:5]
         colors_saliency = entry.get('colors_saliency', [])[:5]
         colors_botanical = entry.get('colors_botanical', [])[:5]
+        colors_chroma = entry.get('colors_chroma', [])[:5]
         colors_visual = entry.get('colors_visual', [])[:5]  # backwards compatibility
 
         record = {
@@ -74,6 +75,11 @@ def create_plants_metadata_csv(masks_meta):
         for i, color in enumerate(colors_botanical, 1):
             record[f'color_botanical_{i}_hex'] = color.get('hex', '')
             record[f'color_botanical_{i}_pct'] = color.get('percentage', 0)
+
+        # Add dominant pigment colors (chroma-filtered)
+        for i, color in enumerate(colors_chroma, 1):
+            record[f'color_chroma_{i}_hex'] = color.get('hex', '')
+            record[f'color_chroma_{i}_pct'] = color.get('percentage', 0)
 
         # Add visual importance colors (backwards compatibility)
         for i, color in enumerate(colors_visual, 1):
