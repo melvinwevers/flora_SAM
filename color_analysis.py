@@ -617,7 +617,9 @@ def extract_dominant_colors(
         # Neutral paper/beige/gray is removed before clustering so rare
         # coloured features (small flowers, berries) are never swamped by
         # the dominant background and always form their own cluster.
-        # Sorted by chroma of each cluster center (most vivid pigment first).
+        # Sorted by botanical contrast so that unusual pigments (purple flowers,
+        # red berries) rank above common leaf/stem yellows that happen to have
+        # high raw chroma.
         if chroma_centers is not None:
             chroma_color_data = []
             for i, rgb in enumerate(chroma_centers):
@@ -634,6 +636,7 @@ def extract_dominant_colors(
                 hsl = rgb_to_hsl(*rgb)
                 lab = rgb_to_lab(*rgb)
                 center_chroma = (lab[1] ** 2 + lab[2] ** 2) ** 0.5
+                bot_contrast = calculate_botanical_contrast_weight(lab, pct)
 
                 chroma_color_data.append({
                     'rgb': list(rgb),
@@ -642,10 +645,11 @@ def extract_dominant_colors(
                     'percentage': pct,
                     'hex': '#{:02x}{:02x}{:02x}'.format(*rgb),
                     'chroma': round(center_chroma, 2),
+                    'bot_contrast': bot_contrast,
                 })
 
             chroma_sorted = sorted(
-                chroma_color_data, key=lambda x: x['chroma'], reverse=True
+                chroma_color_data, key=lambda x: x['bot_contrast'], reverse=True
             )[:n_colors]
         else:
             chroma_sorted = frequency_sorted[:n_colors]
@@ -758,8 +762,8 @@ class ColorAnalyzer:
                     and entry.get('colors_saliency')
                     and entry.get('colors_botanical')
                     and entry.get('colors_chroma')
-                    and 'chroma' in (entry['colors_chroma'][0]
-                                     if entry.get('colors_chroma') else {})
+                    and 'bot_contrast' in (entry['colors_chroma'][0]
+                                           if entry.get('colors_chroma') else {})
                 )
                 if has_new_format:
                     skipped += 1
@@ -780,13 +784,24 @@ class ColorAnalyzer:
                 continue
 
             try:
-                # Load segmented image
-                image = cv2.imread(str(segmented_path))
+                # Load segmented image with alpha so transparent background
+                # pixels (which may have non-zero RGB) are correctly excluded.
+                image = cv2.imread(str(segmented_path), cv2.IMREAD_UNCHANGED)
 
                 if image is None:
                     print(f"Warning: Could not load image {segmented_path}")
                     errors += 1
                     continue
+
+                # If the image has an alpha channel, zero out transparent pixels
+                # before analysis so they are excluded by the non-black mask in
+                # extract_dominant_colors.  Without this, background pixels with
+                # near-black (but non-zero) RGB values inflate pixel counts and
+                # dilute the real plant-pixel percentages.
+                if image.ndim == 3 and image.shape[2] == 4:
+                    alpha = image[:, :, 3]
+                    image[alpha < 10] = 0
+                    image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
 
                 # Get background color from metadata if available
                 background_color = entry.get('background_color_rgb')
