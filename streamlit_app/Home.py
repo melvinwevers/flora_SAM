@@ -36,7 +36,7 @@ with search_col:
 
     for _, row in plants_df.iterrows():
         plant_id = row['plant_id']
-        dutch_name = row.get('Huidige Nederlandse naam')
+        dutch_name = row.get('dutch_name')
         genus = row.get('genus')
         species = row.get('species')
 

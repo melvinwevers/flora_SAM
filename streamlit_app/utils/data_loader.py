@@ -11,30 +11,22 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 THUMBNAILS_DIR = Path(__file__).parent.parent / "thumbnails"
 
 @st.cache_data
-def load_dutch_names():
-    """Load Flora Batava Index with Dutch names.
-
-    The Flora Batava Index rows align with plants_metadata rows by index.
-    """
-    df = pd.read_csv(DATA_DIR / "flora_batava_index.csv")
-    return df
+def load_flora_metadata():
+    """Load Flora Batava illustration metadata keyed by plant_id."""
+    return pd.read_csv(DATA_DIR / "flora_metadata.csv")
 
 @st.cache_data
 def load_plants_metadata():
-    """Load plants metadata CSV with colors and taxonomy."""
+    """Load plants metadata CSV with colors and taxonomy, merged with Flora metadata."""
     df = pd.read_csv(DATA_DIR / "plants_metadata.csv")
-
-    # Merge with Dutch names by index (rows align between files)
-    dutch_names = load_dutch_names()
-
-    # Reset index to ensure alignment, then concat along columns
-    df_reset = df.reset_index(drop=True)
-    dutch_reset = dutch_names.reset_index(drop=True)
-
-    # Concatenate side by side (since rows align)
-    df_merged = pd.concat([df_reset, dutch_reset], axis=1)
-
-    return df_merged
+    # Drop old taxonomy columns — flora_metadata is the authoritative source
+    df = df.drop(columns=['family', 'genus', 'species'], errors='ignore')
+    flora = load_flora_metadata()
+    df = df.merge(flora, on='plant_id', how='left')
+    # Alias species_current → species for backwards compatibility
+    if 'species_current' in df.columns and 'species' not in df.columns:
+        df['species'] = df['species_current']
+    return df
 
 @st.cache_data
 def load_cluster_assignments():

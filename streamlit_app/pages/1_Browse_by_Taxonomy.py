@@ -86,7 +86,7 @@ if search_query:
         filtered_df['plant_id'].str.lower().str.contains(query_lower) |
         filtered_df['genus'].fillna('').str.lower().str.contains(query_lower) |
         filtered_df['species'].fillna('').str.lower().str.contains(query_lower) |
-        filtered_df['Huidige Nederlandse naam'].fillna('').str.lower().str.contains(query_lower)
+        filtered_df['dutch_name'].fillna('').str.lower().str.contains(query_lower)
     ]
 
 # Summary metrics
@@ -193,8 +193,8 @@ else:
                 st.caption(f"**{display_name}**")
 
                 # Dutch name
-                if not pd.isna(plant.get('Huidige Nederlandse naam')):
-                    st.caption(plant['Huidige Nederlandse naam'])
+                if not pd.isna(plant.get('dutch_name')):
+                    st.caption(plant['dutch_name'])
 
                 # Taxonomy
                 if not pd.isna(plant.get('genus')):

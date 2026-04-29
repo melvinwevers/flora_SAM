@@ -38,6 +38,9 @@ env/
 data/
 *.zip
 flora-batava.zip
+# But keep the processed app data
+!streamlit_app/data/
+!streamlit_app/data/**
 
 # Model files
 *.pth

@@ -186,8 +186,8 @@ for row_idx in range(rows):
             st.caption(f"**{display_name}**")
 
             # Dutch name
-            if not pd.isna(plant.get('Huidige Nederlandse naam')):
-                st.caption(plant['Huidige Nederlandse naam'])
+            if not pd.isna(plant.get('dutch_name')):
+                st.caption(plant['dutch_name'])
 
             # Genus
             if not pd.isna(plant.get('genus')):

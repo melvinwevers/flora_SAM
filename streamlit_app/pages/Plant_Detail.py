@@ -29,9 +29,16 @@ if not plant:
     st.stop()
 
 # Display plant with Dutch name
-dutch_name = plant.get('Huidige Nederlandse naam')
+dutch_name = plant.get('dutch_name')
+species_name = plant.get('species_current') or plant.get('species')
 if not pd.isna(dutch_name) and dutch_name:
     st.title(f"🌱 {dutch_name}")
+    if species_name and not pd.isna(species_name):
+        st.caption(f"*{species_name}* · Plant ID: {plant_id}")
+    else:
+        st.caption(f"Plant ID: {plant_id}")
+elif species_name and not pd.isna(species_name):
+    st.title(f"🌱 *{species_name}*")
     st.caption(f"Plant ID: {plant_id}")
 else:
     st.title(f"🌱 {plant_id}")
@@ -62,8 +69,16 @@ with col2:
     else:
         st.write("**Genus:** Unknown")
 
-    if not pd.isna(plant.get('species')):
-        st.write(f"**Species:** {plant['species']}")
+    species_display = plant.get('species_current') or plant.get('species')
+    if species_display and not pd.isna(species_display):
+        st.write(f"**Species:** *{species_display}*")
+
+    if not pd.isna(plant.get('group')):
+        st.write(f"**Group:** {plant['group']}")
+
+    kb_link = plant.get('kb_link')
+    if kb_link and not pd.isna(kb_link):
+        st.markdown(f"[View in Flora Batava (KB)]({kb_link})")
 
     st.subheader("Image Properties")
 

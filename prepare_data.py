@@ -281,18 +281,67 @@ def main():
     if len(clusters_df) > 0:
         metrics = compute_comparison_metrics(plants_df, clusters_df)
 
-    # Step 6: Convert Flora Batava Index Excel to CSV (removes Excel dependency)
-    flora_index_excel = Path("data/Flora Batava Index.xlsx")
-    if flora_index_excel.exists():
-        print("Converting Flora Batava Index to CSV...")
-        flora_df = pd.read_excel(flora_index_excel)
-        flora_subset = flora_df[['Huidige Nederlandse naam', 'Oude Nederlandse naam in Flora Batava',
-                                  'Huidige botanische naam', 'Link naar scans in bladerboek KB']]
-        flora_csv_path = OUTPUT_DIR / "flora_batava_index.csv"
-        flora_subset.to_csv(flora_csv_path, index=False)
-        print(f"  ✓ Saved {len(flora_subset)} entries to {flora_csv_path}")
+    # Step 6: Build flora_metadata.csv from the illustration file names spreadsheet
+    illustration_csv = Path("data/Flora Batava - illustration file names final.csv")
+    if illustration_csv.exists():
+        print("Building flora_metadata.csv from illustration file names...")
+        import csv as csv_mod
+        from collections import defaultdict
+
+        with open(illustration_csv, encoding='utf-8-sig') as f:
+            reader = csv_mod.DictReader(f, delimiter=';')
+            ill_rows = [r for r in reader if r['File name'].strip()]
+
+        file_to_rows = defaultdict(list)
+        for r in ill_rows:
+            fid = r['File name'].replace('.tif.jpg', '')
+            file_to_rows[fid].append(r)
+
+        flora_records = []
+        for fid, file_rows in file_to_rows.items():
+            if len(file_rows) == 1:
+                r = file_rows[0]
+                flora_records.append({
+                    'plant_id': fid,
+                    'volume': r['Volume'],
+                    'species_raw': r['Species name RAW'],
+                    'species_current': r['Species name CURRENT'],
+                    'genus': r['Genus'],
+                    'epithet': r['Epithet'],
+                    'group': r['Group'],
+                    'family': r['Family'],
+                    'dutch_name': r['Dutch common name'].strip() or None,
+                    'kb_link': r['Link.KB'].strip() or None,
+                    'multi_species': False,
+                    'all_species': r['Species name CURRENT'],
+                })
+            else:
+                species_list = [r['Species name CURRENT'] for r in file_rows]
+                dutch_names = [r['Dutch common name'].strip() for r in file_rows if r['Dutch common name'].strip()]
+                families = list(dict.fromkeys(r['Family'] for r in file_rows))
+                genera = list(dict.fromkeys(r['Genus'] for r in file_rows))
+                r0 = file_rows[0]
+                flora_records.append({
+                    'plant_id': fid,
+                    'volume': r0['Volume'],
+                    'species_raw': ' / '.join(r['Species name RAW'] for r in file_rows),
+                    'species_current': ' / '.join(species_list),
+                    'genus': ' / '.join(genera),
+                    'epithet': ' / '.join(r['Epithet'] for r in file_rows),
+                    'group': r0['Group'],
+                    'family': ' / '.join(families),
+                    'dutch_name': ' / '.join(dutch_names) if dutch_names else None,
+                    'kb_link': r0['Link.KB'].strip() or None,
+                    'multi_species': True,
+                    'all_species': ' / '.join(species_list),
+                })
+
+        flora_df = pd.DataFrame(flora_records)
+        flora_csv_path = OUTPUT_DIR / "flora_metadata.csv"
+        flora_df.to_csv(flora_csv_path, index=False)
+        print(f"  ✓ Saved {len(flora_df)} entries to {flora_csv_path}")
     else:
-        print(f"  ⚠ Warning: {flora_index_excel} not found, skipping Flora Batava Index conversion")
+        print(f"  ⚠ Warning: {illustration_csv} not found, skipping flora_metadata.csv generation")
 
     print("=" * 60)
     print("Data preparation complete!")
