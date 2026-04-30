@@ -99,8 +99,8 @@ with col1:
         st.markdown(charts.create_color_palette_display(colors_freq), unsafe_allow_html=True)
 
 with col2:
-    st.subheader("Vividness")
-    st.caption("Colors sorted by chromatic intensity (LAB chroma)")
+    st.subheader("Botanical Contrast")
+    st.caption("Distinctive features (flowers, fruits, berries) filtered from foliage")
 
     colors_chroma = data_loader.get_color_palette(plant_id, ranking='chroma')
     if colors_chroma:

@@ -52,13 +52,13 @@ with col2:
             options=["frequency", "chroma"],
             format_func=lambda x: {
                 "frequency": "Frequency",
-                "chroma": "Vividness",
+                "chroma": "Botanical Contrast",
             }[x],
             help=(
                 "**Frequency** — colors sorted by area coverage.\n\n"
-                "**Vividness** — colors sorted by LAB chroma (√(a² + b²)), "
-                "a perceptually uniform measure of color intensity. Reveals what "
-                "the 18th-century illustrator emphasized with vivid watercolor pigments."
+                "**Botanical Contrast** — distinctive features (flowers, fruits, berries) "
+                "using hue-based scoring. Filters out dominant green/yellow foliage to "
+                "surface rare, vivid colors that 18th-century illustrators emphasized."
             )
         )
 

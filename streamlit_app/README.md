@@ -45,7 +45,7 @@ streamlit_app/
 All data files are in `streamlit_app/data/`:
 
 - **flora_data.json** (12 MB): Consolidated plant data including:
-  - 2,241 plants with colors (frequency, saliency, chroma rankings)
+  - 2,241 plants with colors (frequency and botanical contrast rankings)
   - Full LAB color data for each color
   - Dimensions and mask percentages
   - Authoritative Flora Batava taxonomy and metadata
@@ -90,10 +90,9 @@ Or use the "Clear cache" option in the Streamlit hamburger menu.
 - **Taxonomy**: 473 plants with family/genus data from authoritative Flora Batava spreadsheet
 - **Visual Embeddings**: DINOv2 deep learning model
 - **Clusters**: 23 visual similarity groups discovered by DINOv2
-- **Colors**: Top 5 colors per plant ranked by:
-  - Frequency (pixel count)
-  - Saliency (visual attention)
-  - Chroma (color vividness)
+- **Colors**: Top 10 colors per plant ranked by:
+  - Frequency (pixel area coverage)
+  - Botanical Contrast (distinctive features: flowers, fruits, berries)
 
 ## License
 
