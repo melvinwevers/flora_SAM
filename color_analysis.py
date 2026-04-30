@@ -342,15 +342,17 @@ def extract_dominant_colors(
     total_pixels_full = len(pixels)
 
     # --- Chroma pass: K-means on only chromatic (non-neutral) pixels ---
-    # Filters to LAB chroma = √(a²+b²) > 15, removing paper, beige, and
-    # neutral grays. This makes rare coloured features (e.g. 0.3% terracotta
-    # flowers) a significant fraction of the remaining pixels so K-means
-    # reliably allocates them their own cluster.
+    # Filters to LAB chroma = √(a²+b²) > 8, removing paper, beige, and
+    # neutral grays. Lowered from 15 to 8 to capture pastel blues/pinks
+    # in historical watercolor illustrations. This makes rare coloured
+    # features (e.g. 0.3% terracotta flowers, pale blue petals) a
+    # significant fraction of the remaining pixels so K-means reliably
+    # allocates them their own cluster.
     pixels_lab_all = rgb2lab(
         (pixels.astype(np.float32) / 255.0).reshape(-1, 1, 3)
     ).reshape(-1, 3)
     chroma_all = np.sqrt(pixels_lab_all[:, 1] ** 2 + pixels_lab_all[:, 2] ** 2)
-    chromatic_mask = chroma_all > 15.0
+    chromatic_mask = chroma_all > 8.0  # Lowered from 15 to capture pastels
     chromatic_pixels = pixels[chromatic_mask]
 
     if len(chromatic_pixels) >= n_colors:
