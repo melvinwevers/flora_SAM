@@ -6,6 +6,7 @@ Extracts dominant colors from segmented flora images:
 - Extracts top 5 dominant colors using k-means clustering
 - Provides RGB, HSL, and LAB color representations
 - Filters out background colors (optional)
+- Calculates 3 color rankings: frequency, saliency, chroma
 - Updates metadata with color information
 """
 
@@ -158,125 +159,6 @@ def is_similar_to_background(rgb, background_rgb, tolerance=50):
     distance = color_distance(rgb, background_rgb)
     return distance <= tolerance
 
-
-def calculate_perceptual_weight(rgb, hsl, lab, percentage, all_colors_lab):
-    """
-    Calculate perceptual weight combining frequency, saturation, and contrast.
-
-    This is a heuristic for color palette ranking, NOT true visual salience.
-
-    Args:
-        rgb: RGB tuple of the color (kept for backwards compatibility)
-        hsl: HSL tuple of the color (H, S, L)
-        lab: LAB tuple of the color (L, a, b)
-        percentage: Frequency percentage
-        all_colors_lab: List of all LAB colors for perceptually accurate contrast calculation
-
-    Returns:
-        Perceptual weight score (higher = more perceptually distinctive)
-    """
-    # Saturation component (0-100) - more saturated colors are more perceptually distinctive
-    saturation_score = hsl[1] / 100.0
-
-    # Calculate average perceptual distance to OTHER colors (excluding self)
-    if len(all_colors_lab) > 1:
-        # Find index of current color
-        current_index = None
-        for i, existing_lab in enumerate(all_colors_lab):
-            # Use numpy.allclose for floating-point comparison
-            if np.allclose(existing_lab, lab, atol=0.1):
-                current_index = i
-                break
-
-        # Get distances to all OTHER colors (exclude current)
-        distances = []
-        for i, other_lab in enumerate(all_colors_lab):
-            if i != current_index:
-                dist = color_distance_lab(lab, other_lab)
-                distances.append(dist)
-
-        # Average distance (0 if only one color in palette)
-        avg_distance = np.mean(distances) if distances else 0
-
-        # Normalize to 0-1 (typical max Delta E in a palette is ~100-150, use 150 for normalization)
-        contrast_score = min(avg_distance / 150.0, 1.0)
-    else:
-        contrast_score = 0
-
-    # Frequency component (already 0-100, normalize to 0-1)
-    frequency_score = percentage / 100.0
-
-    # Weighted combination: 40% frequency, 30% saturation, 30% contrast
-    # This gives frequency most weight but still values visually distinct colors
-    weight = (0.4 * frequency_score) + (0.3 * saturation_score) + (0.3 * contrast_score)
-
-    return weight
-
-
-def calculate_botanical_contrast_weight(lab, percentage):
-    """
-    Rank colors by how much they stand out against a typical botanical background.
-
-    Botanical illustrations are dominated by greens (leaves/stems) and
-    browns/beiges (paper, bark, dried material). Colors that are perceptually
-    far from this reference palette are considered "distinctive" - flowers,
-    berries, and unusual pigments.
-
-    The reference palette covers:
-    - Greens:  various leaf/stem greens
-    - Browns:  bark, dried material, aged paper
-    - Beiges:  paper background tones
-    - Grays:   aged/faded tones
-
-    Args:
-        lab: LAB tuple (L, a, b) of the color to score
-        percentage: Frequency percentage of this color in the image
-
-    Returns:
-        Botanical contrast score (higher = more distinctive vs background)
-    """
-    # Reference botanical background colors in LAB space
-    # (L, a, b) - measured from typical botanical illustration backgrounds
-    botanical_background_lab = [
-        # Greens
-        (45, -20, 25),   # dark leaf green
-        (55, -25, 30),   # mid leaf green
-        (65, -18, 22),   # light leaf green
-        (50, -15, 20),   # olive/stem green
-        (40, -10, 15),   # dark olive green
-        # Browns / tans
-        (45, 10, 25),    # warm brown bark
-        (55, 8, 20),     # light brown
-        (60, 5, 15),     # tan / dry stem
-        (35, 8, 15),     # dark brown
-        # Beiges / paper
-        (85, 2, 8),      # aged paper
-        (90, 0, 5),      # white paper
-        (75, 3, 12),     # warm beige
-        # Grays
-        (60, 0, 2),      # mid gray
-        (45, 0, 2),      # dark gray
-    ]
-
-    # Find the minimum distance to any reference color
-    min_dist = min(
-        color_distance_lab(lab, ref)
-        for ref in botanical_background_lab
-    )
-
-    # Normalize: a Delta E of ~50 is already a very large perceptual difference
-    # (e.g. a pure red vs a mid green). Cap at 60 to avoid runaway scores.
-    contrast_score = min(min_dist / 60.0, 1.0)
-
-    # Small frequency boost: a tiny sliver of bright red still matters,
-    # but a large swath of unusual color is more reliable.
-    # Cap frequency contribution at 30% so it doesn't drown out contrast.
-    frequency_score = min(percentage / 100.0, 0.3)
-
-    # 80% contrast, 20% frequency
-    weight = 0.80 * contrast_score + 0.20 * frequency_score
-
-    return round(weight, 4)
 
 
 def compute_saliency_map(image, mask=None, max_size=512):
@@ -454,8 +336,7 @@ def extract_dominant_colors(
 
     if len(pixels) == 0:
         print("Warning: No non-zero pixels found in image")
-        empty = {'frequency': [], 'perceptual': [], 'saliency': [],
-                 'botanical': [], 'chroma': []}
+        empty = {'frequency': [], 'saliency': [], 'chroma': []}
         return empty if calculate_both else []
 
     total_pixels_full = len(pixels)
@@ -496,7 +377,7 @@ def extract_dominant_colors(
     else:
         chroma_centers = None
 
-    # --- Regular uniform sample for frequency / perceptual / saliency ---
+    # --- Regular uniform sample for frequency / saliency ---
     if len(pixels) > sample_size:
         indices = np.random.choice(len(pixels), sample_size, replace=False)
         pixels = pixels[indices]
@@ -553,28 +434,15 @@ def extract_dominant_colors(
             'lab': lab,
             'percentage': round(float(percentage), 2),
             'hex': '#{:02x}{:02x}{:02x}'.format(*rgb),
-            'rgb_tuple': rgb,  # Keep for visual importance calculation
-            'hsl_tuple': hsl,
-            'lab_tuple': lab  # Keep for perceptual weight calculation
+            'rgb_tuple': rgb,  # Keep for saliency calculation
         })
 
-    # Always calculate visual importance for all colors
+    # Calculate saliency for all colors
     if len(color_data) > 0:
         # Compute saliency map once for all colors (major optimization)
         saliency_map, image_rgb = compute_saliency_map(image)
 
         for color in color_data:
-            # Calculate perceptual weight (heuristic based on color properties)
-            # Uses LAB for perceptually accurate contrast calculation
-            perceptual = calculate_perceptual_weight(
-                color['rgb_tuple'],
-                color['hsl_tuple'],
-                color['lab_tuple'],
-                color['percentage'],
-                all_lab_colors
-            )
-            color['perceptual_weight'] = round(perceptual, 4)
-
             # Calculate true visual salience using precomputed saliency map
             saliency = calculate_saliency_weight(saliency_map, image_rgb, color['rgb_tuple'])
             color['saliency_weight'] = round(saliency, 4)
@@ -582,46 +450,26 @@ def extract_dominant_colors(
             # For backwards compatibility, use saliency as primary
             color['visual_importance'] = round(saliency, 4)
 
-            # Calculate botanical contrast: how much does this color stand out
-            # against typical green/brown botanical illustration backgrounds
-            botanical = calculate_botanical_contrast_weight(
-                color['lab_tuple'],
-                color['percentage']
-            )
-            color['botanical_contrast_weight'] = botanical
-
     # If calculate_both, return all rankings
     if calculate_both:
         # Three sorted lists from regular K-means
         frequency_sorted = sorted(
             color_data, key=lambda x: x['percentage'], reverse=True
         )
-        perceptual_sorted = sorted(
-            color_data, key=lambda x: x['perceptual_weight'], reverse=True
-        )
         saliency_sorted = sorted(
             color_data, key=lambda x: x['saliency_weight'], reverse=True
         )
-        botanical_sorted = sorted(
-            color_data,
-            key=lambda x: x['botanical_contrast_weight'],
-            reverse=True,
-        )
 
-        for color in (
-            frequency_sorted + perceptual_sorted
-            + saliency_sorted + botanical_sorted
-        ):
+        for color in (frequency_sorted + saliency_sorted):
             color.pop('rgb_tuple', None)
-            color.pop('hsl_tuple', None)
 
         # Chroma ranking: K-means on LAB-chroma > 15 pixels only.
         # Neutral paper/beige/gray is removed before clustering so rare
         # coloured features (small flowers, berries) are never swamped by
         # the dominant background and always form their own cluster.
-        # Sorted by botanical contrast so that unusual pigments (purple flowers,
-        # red berries) rank above common leaf/stem yellows that happen to have
-        # high raw chroma.
+        # Sorted by raw chroma (vividness) = √(a² + b²) to prioritize
+        # the most vivid colors, which reveals what the 18th-century
+        # illustrator emphasized with saturated watercolor pigments.
         if chroma_centers is not None:
             chroma_color_data = []
             for i, rgb in enumerate(chroma_centers):
@@ -638,7 +486,6 @@ def extract_dominant_colors(
                 hsl = rgb_to_hsl(*rgb)
                 lab = rgb_to_lab(*rgb)
                 center_chroma = (lab[1] ** 2 + lab[2] ** 2) ** 0.5
-                bot_contrast = calculate_botanical_contrast_weight(lab, pct)
 
                 chroma_color_data.append({
                     'rgb': list(rgb),
@@ -647,20 +494,17 @@ def extract_dominant_colors(
                     'percentage': pct,
                     'hex': '#{:02x}{:02x}{:02x}'.format(*rgb),
                     'chroma': round(center_chroma, 2),
-                    'bot_contrast': bot_contrast,
                 })
 
             chroma_sorted = sorted(
-                chroma_color_data, key=lambda x: x['bot_contrast'], reverse=True
+                chroma_color_data, key=lambda x: x['chroma'], reverse=True
             )[:n_colors]
         else:
             chroma_sorted = frequency_sorted[:n_colors]
 
         return {
             'frequency': frequency_sorted[:n_colors],
-            'perceptual': perceptual_sorted[:n_colors],
             'saliency': saliency_sorted[:n_colors],
-            'botanical': botanical_sorted[:n_colors],
             'chroma': chroma_sorted,
         }
     else:
@@ -670,7 +514,6 @@ def extract_dominant_colors(
         # Clean up temporary fields
         for color in color_data:
             color.pop('rgb_tuple', None)
-            color.pop('hsl_tuple', None)
 
         # Return only top n_colors
         return color_data[:n_colors]
@@ -689,9 +532,10 @@ def _process_single_image(args):
         if image is None:
             return (mask_key, None, f"Could not load {segmented_path}")
 
+        # Handle alpha channel for RGBA images
         if image.ndim == 3 and image.shape[2] == 4:
-            alpha = image[:, :, 3]
-            image[alpha < 10] = 0
+            alpha_channel = image[:, :, 3]
+            image[alpha_channel < 10] = 0
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
 
         color_results = extract_dominant_colors(
@@ -703,6 +547,7 @@ def _process_single_image(args):
             calculate_both=True,
             crop_borders=crop_borders,
         )
+
         return (mask_key, color_results, None)
     except Exception as e:
         return (mask_key, None, str(e))
@@ -790,16 +635,16 @@ class ColorAnalyzer:
         work_items = []
         for mask_key, entry in self.masks_metadata.items():
             if not self.force:
-                has_new_format = (
+                # Check if all three color rankings exist
+                has_all_rankings = (
                     entry.get('colors_frequency')
-                    and entry.get('colors_perceptual')
                     and entry.get('colors_saliency')
-                    and entry.get('colors_botanical')
                     and entry.get('colors_chroma')
-                    and 'bot_contrast' in (entry['colors_chroma'][0]
-                                           if entry.get('colors_chroma') else {})
+                    # Verify chroma format has 'chroma' field
+                    and 'chroma' in (entry['colors_chroma'][0]
+                                     if entry.get('colors_chroma') else {})
                 )
-                if has_new_format:
+                if has_all_rankings:
                     skipped += 1
                     continue
 
@@ -840,9 +685,7 @@ class ColorAnalyzer:
 
                 entry = self.masks_metadata[mask_key]
                 entry['colors_frequency'] = color_results['frequency']
-                entry['colors_perceptual'] = color_results['perceptual']
                 entry['colors_saliency'] = color_results['saliency']
-                entry['colors_botanical'] = color_results['botanical']
                 entry['colors_chroma'] = color_results['chroma']
                 entry['colors'] = color_results['frequency']
                 entry['colors_visual'] = color_results['saliency']

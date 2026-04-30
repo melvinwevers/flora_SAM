@@ -83,3 +83,12 @@ Thumbs.db
 
 # Git worktrees
 .worktrees/
+
+docs/
+
+# Archive folder
+archive/
+
+# Cache directories
+embeddings_cache/
+thumbnails_cache/

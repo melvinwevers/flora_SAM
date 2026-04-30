@@ -1,6 +1,12 @@
-# Flora SAM
+# Flora Batava Plant Explorer
 
-Interactive segmentation tool for botanical illustrations using Meta's Segment Anything Model (SAM).
+An interactive Streamlit application for exploring 2,241 historical botanical illustrations from the Flora Batava collection.
+
+## Features
+
+- **Browse by Taxonomy**: Navigate through plant families, genera, and species
+- **Visual Clusters**: Explore AI-discovered similarity groups using DINOv2, CLIP, PlantNet, and Combined embeddings
+- **Color Analysis**: Analyze color patterns and their relationships to taxonomy and clusters
 
 ## Quick Start
 
@@ -8,39 +14,85 @@ Interactive segmentation tool for botanical illustrations using Meta's Segment A
 # Install dependencies
 uv sync
 
-# Run interactive segmentation
+# Run the Streamlit app
+uv run streamlit run streamlit_app/Home.py
+```
+
+The app will open in your default browser at `http://localhost:8501`.
+
+## Dataset
+
+- **Source**: Flora Batava historical botanical illustrations
+- **Plants**: 2,241 segmented specimens
+- **Taxonomy**: 473 plants with family/genus data from authoritative Flora Batava spreadsheet
+- **Visual Embeddings**: DINOv2 deep learning model
+- **Clusters**: 23 visual similarity groups discovered by DINOv2
+- **Colors**: Top 5 colors per plant ranked by:
+  - Frequency (pixel count)
+  - Saliency (visual attention)
+  - Chroma (color vividness)
+
+## Project Structure
+
+```
+flora_SAM/
+├── streamlit_app/          # Main Streamlit application
+│   ├── Home.py            # App entry point
+│   ├── pages/             # Individual app pages
+│   ├── data/              # Plant metadata and analysis results
+│   ├── thumbnails/        # Plant thumbnail images
+│   └── utils/             # Shared utilities
+├── sam_batch_interactive.py  # SAM segmentation tool (for development)
+├── archive/               # Archived development scripts
+└── pyproject.toml         # Project dependencies
+```
+
+## Data Processing Pipeline
+
+The app uses preprocessed data stored in a single consolidated JSON file (`streamlit_app/data/flora_data.json`). To regenerate or update the data:
+
+### 1. Segment Plant Illustrations
+
+Extract plant segments from illustrations using SAM:
+
+```bash
 python sam_batch_interactive.py
 ```
 
-The script automatically downloads the SAM model on first run (~375MB).
+### 2. Analyze Colors
 
-## Usage
-
-Process botanical illustrations from the Flora Batava dataset:
-
-- **Click**: Add positive point (include area)
-- **Shift+Click**: Add negative point (exclude area)
-- **z**: Undo last point
-- **s**: Save mask and move to next image
-- **r**: Reset current image
-- **u**: Skip to next unprocessed image
-- **q**: Quit
-
-## Output
-
-The tool generates:
-- Binary masks (`*_mask.png`)
-- Segmented images (`*_segmented.png`)
-- JSON metadata file with mask areas and image dimensions
-
-All outputs are saved to the `masks/` directory.
-
-## Configuration
+Extract color features from segmented plant illustrations:
 
 ```bash
-python sam_batch_interactive.py \
-  --data-dir data \
-  --meta flora_meta.xlsx \
-  --model sam_vit_b.pth \
-  --output masks
+python color_analysis.py
 ```
+
+This generates `masks_metadata.json` with plant dimensions and color data (frequency, saliency, chroma rankings).
+
+### 3. Generate DINOv2 Embeddings and Clusters
+
+Extract DINOv2 embeddings and compute HDBSCAN clusters:
+
+```bash
+python generate_embeddings.py --input masks/ --use-cache
+```
+
+This creates `visualizations/cluster_data/cluster_data_dinov2.json` with cluster assignments.
+
+### 4. Prepare Consolidated Data
+
+Process and consolidate all plant data into a single JSON file:
+
+```bash
+python prepare_data.py
+```
+
+This creates `streamlit_app/data/flora_data.json` containing:
+- Plant colors (frequency, saliency, chroma rankings) with full LAB color data
+- Authoritative Flora Batava taxonomy from illustration metadata
+- DINOv2 cluster assignments (23 visual similarity groups)
+- Precomputed comparison metrics
+
+
+- [Streamlit App Documentation](streamlit_app/README.md)
+

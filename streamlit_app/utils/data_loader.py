@@ -11,44 +11,102 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 THUMBNAILS_DIR = Path(__file__).parent.parent / "thumbnails"
 
 @st.cache_data
-def load_flora_metadata():
-    """Load Flora Batava illustration metadata keyed by plant_id."""
-    return pd.read_csv(DATA_DIR / "flora_metadata.csv")
-
-@st.cache_data
-def load_plants_metadata():
-    """Load plants metadata CSV with colors and taxonomy, merged with Flora metadata."""
-    df = pd.read_csv(DATA_DIR / "plants_metadata.csv")
-    # Drop old taxonomy columns — flora_metadata is the authoritative source
-    df = df.drop(columns=['family', 'genus', 'species'], errors='ignore')
-    flora = load_flora_metadata()
-    df = df.merge(flora, on='plant_id', how='left')
-    # Alias species_current → species for backwards compatibility
-    if 'species_current' in df.columns and 'species' not in df.columns:
-        df['species'] = df['species_current']
-    return df
-
-@st.cache_data
-def load_cluster_assignments():
-    """Load cluster assignments for all models."""
-    df = pd.read_csv(DATA_DIR / "cluster_assignments.csv")
-    return df
-
-@st.cache_data
-def load_comparison_metrics():
-    """Load precomputed comparison metrics."""
-    with open(DATA_DIR / "comparison_metrics.json") as f:
+def load_flora_data():
+    """Load consolidated flora data from JSON."""
+    with open(DATA_DIR / "flora_data.json") as f:
         return json.load(f)
 
 @st.cache_data
-def load_merged_data():
-    """Load and merge all data sources."""
-    plants = load_plants_metadata()
-    clusters = load_cluster_assignments()
+def load_plants_dataframe():
+    """
+    Convert consolidated JSON to pandas DataFrame for compatibility.
 
-    # Merge on plant_id
-    merged = plants.merge(clusters, on='plant_id', how='left')
-    return merged
+    This replaces the old load_merged_data() function and returns the same structure.
+    """
+    data = load_flora_data()
+
+    records = []
+    for plant_id, plant in data['plants'].items():
+        record = {
+            'plant_id': plant_id,
+            'filename': plant['filename'],
+            **plant['dimensions'],  # width, height, area_pixels, mask_percentage
+        }
+
+        # Flatten frequency colors
+        for i, color in enumerate(plant['colors'].get('frequency', [])[:5], 1):
+            record[f'color_freq_{i}_hex'] = color['hex']
+            record[f'color_freq_{i}_pct'] = color['percentage']
+
+        # Flatten chroma colors
+        for i, color in enumerate(plant['colors'].get('chroma', [])[:5], 1):
+            record[f'color_chroma_{i}_hex'] = color['hex']
+            record[f'color_chroma_{i}_pct'] = color['percentage']
+
+        # Flatten saliency colors
+        for i, color in enumerate(plant['colors'].get('saliency', [])[:5], 1):
+            record[f'color_saliency_{i}_hex'] = color['hex']
+            record[f'color_saliency_{i}_pct'] = color['percentage']
+
+        # Add visual as alias for saliency (backwards compatibility)
+        for i, color in enumerate(plant['colors'].get('saliency', [])[:5], 1):
+            record[f'color_visual_{i}_hex'] = color['hex']
+            record[f'color_visual_{i}_pct'] = color['percentage']
+
+        # Add taxonomy fields
+        tax = plant.get('taxonomy', {})
+        record.update({
+            'family': tax.get('family'),
+            'genus': tax.get('genus'),
+            'species': tax.get('species_current'),  # Alias
+            'species_current': tax.get('species_current'),
+            'species_raw': tax.get('species_raw'),
+            'volume': tax.get('volume'),
+            'epithet': tax.get('epithet'),
+            'group': tax.get('group'),
+            'dutch_name': tax.get('dutch_name'),
+            'kb_link': tax.get('kb_link'),
+            'multi_species': tax.get('multi_species', False),
+            'all_species': tax.get('all_species'),
+        })
+
+        # Add cluster assignment (DINOv2 only)
+        clusters = plant.get('clusters', {})
+        record['dinov2'] = clusters.get('dinov2', -1)
+
+        records.append(record)
+
+    return pd.DataFrame(records)
+
+@st.cache_data
+def load_comparison_metrics():
+    """Load comparison metrics from consolidated JSON."""
+    data = load_flora_data()
+    return data.get('comparison_metrics', {})
+
+# Backwards compatibility aliases
+@st.cache_data
+def load_flora_metadata():
+    """Deprecated: Use load_plants_dataframe() instead."""
+    return load_plants_dataframe()[['plant_id', 'family', 'genus', 'species_current', 'species_raw',
+                                      'volume', 'epithet', 'group', 'dutch_name', 'kb_link',
+                                      'multi_species', 'all_species']].drop_duplicates()
+
+@st.cache_data
+def load_plants_metadata():
+    """Deprecated: Use load_plants_dataframe() instead."""
+    return load_plants_dataframe()
+
+@st.cache_data
+def load_cluster_assignments():
+    """Deprecated: Use load_plants_dataframe() instead."""
+    df = load_plants_dataframe()
+    return df[['plant_id', 'dinov2']].drop_duplicates()
+
+@st.cache_data
+def load_merged_data():
+    """Deprecated: Use load_plants_dataframe() instead."""
+    return load_plants_dataframe()
 
 def get_thumbnail_path(plant_id):
     """Get thumbnail path for a plant_id."""
@@ -153,7 +211,7 @@ def get_color_palette(plant_id, ranking='frequency'):
 
     Args:
         plant_id: Plant identifier
-        ranking: One of 'frequency', 'perceptual', or 'saliency'
+        ranking: One of 'frequency', 'chroma', 'perceptual', or 'saliency'
     """
     plant = get_plant_details(plant_id)
 

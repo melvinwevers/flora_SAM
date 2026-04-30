@@ -88,43 +88,19 @@ with col2:
 # Color palettes
 st.header("Color Palettes")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Frequency")
-    st.caption("Most area coverage")
+    st.caption("Colors sorted by area coverage")
 
     colors_freq = data_loader.get_color_palette(plant_id, ranking='frequency')
     if colors_freq:
         st.markdown(charts.create_color_palette_display(colors_freq), unsafe_allow_html=True)
 
 with col2:
-    st.subheader("Botanical Contrast")
-    st.caption("Pops against green/brown — flowers, berries, unusual pigments")
-
-    colors_botanical = data_loader.get_color_palette(plant_id, ranking='botanical')
-    if colors_botanical:
-        st.markdown(charts.create_color_palette_display(colors_botanical), unsafe_allow_html=True)
-
-with col3:
-    st.subheader("Perceptual")
-    st.caption("Balances area, saturation, and contrast")
-
-    colors_perceptual = data_loader.get_color_palette(plant_id, ranking='perceptual')
-    if colors_perceptual:
-        st.markdown(charts.create_color_palette_display(colors_perceptual), unsafe_allow_html=True)
-
-with col4:
-    st.subheader("Salience")
-    st.caption("Colors in visually prominent regions")
-
-    colors_saliency = data_loader.get_color_palette(plant_id, ranking='saliency')
-    if colors_saliency:
-        st.markdown(charts.create_color_palette_display(colors_saliency), unsafe_allow_html=True)
-
-with col5:
-    st.subheader("Dominant Pigments")
-    st.caption("Vivid pigments only — neutral paper/beige removed")
+    st.subheader("Vividness")
+    st.caption("Colors sorted by chromatic intensity (LAB chroma)")
 
     colors_chroma = data_loader.get_color_palette(plant_id, ranking='chroma')
     if colors_chroma:

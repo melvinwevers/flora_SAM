@@ -26,11 +26,11 @@ def load_masks_metadata():
     with open(MASKS_META) as f:
         return json.load(f)
 
-def create_plants_metadata_csv(masks_meta):
-    """Create slimmed CSV with essential plant metadata."""
-    print("Creating plants_metadata.csv...")
+def create_plants_metadata_json(masks_meta):
+    """Create JSON with structured plant metadata including full color data."""
+    print("Creating plants_metadata.json...")
 
-    records = []
+    plants = {}
     for mask_key, entry in masks_meta.items():
         # Extract filename without path
         filename = Path(entry['segmented_file']).name
@@ -40,65 +40,78 @@ def create_plants_metadata_csv(masks_meta):
         if plant_id.endswith('.tif'):
             plant_id = plant_id[:-4]
 
-        # Extract top 5 colors from all five rankings
+        # Extract top 5 colors from frequency and vividness (chroma) rankings
         colors_freq = entry.get('colors_frequency', [])[:5]
-        colors_perceptual = entry.get('colors_perceptual', [])[:5]
-        colors_saliency = entry.get('colors_saliency', [])[:5]
-        colors_botanical = entry.get('colors_botanical', [])[:5]
         colors_chroma = entry.get('colors_chroma', [])[:5]
-        colors_visual = entry.get('colors_visual', [])[:5]  # backwards compatibility
 
-        record = {
+        # Calculate mask dimensions and percentage of full image
+        mask_width = entry.get('image_dimensions', {}).get('width', 0)
+        mask_height = entry.get('image_dimensions', {}).get('height', 0)
+        mask_area = entry.get('area_pixels', 0)
+
+        # Calculate percentage of mask relative to full image dimensions
+        total_mask_box_pixels = mask_width * mask_height if mask_width and mask_height else 0
+        mask_percentage = (mask_area / total_mask_box_pixels * 100) if total_mask_box_pixels > 0 else 0
+
+        # Structure colors as list of dictionaries with full LAB data
+        frequency_colors = []
+        for color in colors_freq:
+            lab = color.get('lab', [0, 0, 0])
+            rgb = color.get('rgb', [0, 0, 0])
+            frequency_colors.append({
+                'hex': color.get('hex', ''),
+                'percentage': round(color.get('percentage', 0), 2),
+                'rgb': rgb,
+                'lab': {
+                    'L': round(lab[0], 2),
+                    'a': round(lab[1], 2),
+                    'b': round(lab[2], 2)
+                }
+            })
+
+        vividness_colors = []
+        for color in colors_chroma:
+            lab = color.get('lab', [0, 0, 0])
+            rgb = color.get('rgb', [0, 0, 0])
+            chroma = color.get('chroma', 0)
+            vividness_colors.append({
+                'hex': color.get('hex', ''),
+                'percentage': round(color.get('percentage', 0), 2),
+                'chroma': round(chroma, 2),
+                'rgb': rgb,
+                'lab': {
+                    'L': round(lab[0], 2),
+                    'a': round(lab[1], 2),
+                    'b': round(lab[2], 2)
+                }
+            })
+
+        plants[plant_id] = {
             'plant_id': plant_id,
             'filename': filename,
-            'area_pixels': entry.get('area_pixels', 0),
-            'width': entry.get('image_dimensions', {}).get('width', 0),
-            'height': entry.get('image_dimensions', {}).get('height', 0),
+            'dimensions': {
+                'width': mask_width,
+                'height': mask_height,
+                'area_pixels': mask_area,
+                'mask_percentage': round(mask_percentage, 2)
+            },
+            'colors': {
+                'frequency': frequency_colors,
+                'vividness': vividness_colors
+            }
         }
 
-        # Add frequency-ranked colors
-        for i, color in enumerate(colors_freq, 1):
-            record[f'color_freq_{i}_hex'] = color.get('hex', '')
-            record[f'color_freq_{i}_pct'] = color.get('percentage', 0)
-
-        # Add perceptual-ranked colors
-        for i, color in enumerate(colors_perceptual, 1):
-            record[f'color_perceptual_{i}_hex'] = color.get('hex', '')
-            record[f'color_perceptual_{i}_pct'] = color.get('percentage', 0)
-
-        # Add saliency-ranked colors
-        for i, color in enumerate(colors_saliency, 1):
-            record[f'color_saliency_{i}_hex'] = color.get('hex', '')
-            record[f'color_saliency_{i}_pct'] = color.get('percentage', 0)
-
-        # Add botanical contrast colors
-        for i, color in enumerate(colors_botanical, 1):
-            record[f'color_botanical_{i}_hex'] = color.get('hex', '')
-            record[f'color_botanical_{i}_pct'] = color.get('percentage', 0)
-
-        # Add dominant pigment colors (chroma-filtered)
-        for i, color in enumerate(colors_chroma, 1):
-            record[f'color_chroma_{i}_hex'] = color.get('hex', '')
-            record[f'color_chroma_{i}_pct'] = color.get('percentage', 0)
-
-        # Add visual importance colors (backwards compatibility)
-        for i, color in enumerate(colors_visual, 1):
-            record[f'color_visual_{i}_hex'] = color.get('hex', '')
-            record[f'color_visual_{i}_pct'] = color.get('percentage', 0)
-
-        records.append(record)
-
-    df = pd.DataFrame(records)
-    output_path = OUTPUT_DIR / "plants_metadata.csv"
-    df.to_csv(output_path, index=False)
-    print(f"  ✓ Saved {len(df)} plants to {output_path}")
-    return df
+    output_path = OUTPUT_DIR / "plants_metadata.json"
+    with open(output_path, 'w') as f:
+        json.dump(plants, f, indent=2)
+    print(f"  ✓ Saved {len(plants)} plants to {output_path}")
+    return plants
 
 def extract_cluster_assignments():
     """Extract cluster assignments from cluster data JSONs."""
     print("Extracting cluster assignments...")
 
-    models = ['dinov2', 'clip', 'plantnet', 'combined']
+    models = ['dinov2']
     all_assignments = []
 
     for model in models:
@@ -255,39 +268,77 @@ def compute_comparison_metrics(plants_df, clusters_df):
     print(f"  ✓ Saved comparison metrics to {output_path}")
     return metrics
 
-def main():
-    """Run all data preparation steps."""
-    print("=" * 60)
-    print("Preparing data for Streamlit app")
-    print("=" * 60)
+def create_consolidated_json(masks_meta):
+    """
+    Create consolidated JSON with all plant data, taxonomy, clusters, and metrics.
 
-    # Step 1: Load masks metadata
-    masks_meta = load_masks_metadata()
+    This single JSON replaces multiple CSV files:
+    - plants_metadata.csv
+    - flora_metadata.csv
+    - cluster_assignments.csv
+    - comparison_metrics.json
+    """
+    print("Creating consolidated flora_data.json...")
+    import csv as csv_mod
+    from collections import defaultdict
 
-    # Step 2: Create plants metadata CSV
-    plants_df = create_plants_metadata_csv(masks_meta)
+    # Step 1: Build base plant data from masks metadata
+    plants = {}
+    for mask_key, entry in masks_meta.items():
+        filename = Path(entry['segmented_file']).name
+        plant_id = filename.replace('_segmented.png', '')
+        if plant_id.endswith('.tif'):
+            plant_id = plant_id[:-4]
 
-    # Step 3: Link taxonomic data
-    plants_df = link_taxonomic_data(plants_df)
+        # Extract colors (frequency, saliency, chroma)
+        colors_freq = entry.get('colors_frequency', [])[:5]
+        colors_saliency = entry.get('colors_saliency', [])[:5]
+        colors_chroma = entry.get('colors_chroma', [])[:5]
 
-    # Save updated plants metadata with taxonomy
-    output_path = OUTPUT_DIR / "plants_metadata.csv"
-    plants_df.to_csv(output_path, index=False)
+        # Dimensions
+        mask_width = entry.get('image_dimensions', {}).get('width', 0)
+        mask_height = entry.get('image_dimensions', {}).get('height', 0)
+        mask_area = entry.get('area_pixels', 0)
+        total_pixels = mask_width * mask_height if mask_width and mask_height else 0
+        mask_percentage = (mask_area / total_pixels * 100) if total_pixels > 0 else 0
 
-    # Step 4: Extract cluster assignments
-    clusters_df = extract_cluster_assignments()
+        # Helper to format color
+        def format_color(color):
+            lab = color.get('lab', [0, 0, 0])
+            return {
+                'hex': color.get('hex', ''),
+                'percentage': round(color.get('percentage', 0), 2),
+                'rgb': color.get('rgb', [0, 0, 0]),
+                'lab': {'L': round(lab[0], 2), 'a': round(lab[1], 2), 'b': round(lab[2], 2)}
+            }
 
-    # Step 5: Compute comparison metrics
-    if len(clusters_df) > 0:
-        metrics = compute_comparison_metrics(plants_df, clusters_df)
+        def format_chroma_color(color):
+            result = format_color(color)
+            result['chroma'] = round(color.get('chroma', 0), 2)
+            return result
 
-    # Step 6: Build flora_metadata.csv from the illustration file names spreadsheet
-    illustration_csv = Path("data/Flora Batava - illustration file names final.csv")
+        plants[plant_id] = {
+            'plant_id': plant_id,
+            'filename': filename,
+            'dimensions': {
+                'width': mask_width,
+                'height': mask_height,
+                'area_pixels': mask_area,
+                'mask_percentage': round(mask_percentage, 2)
+            },
+            'colors': {
+                'frequency': [format_color(c) for c in colors_freq],
+                'saliency': [format_color(c) for c in colors_saliency],
+                'chroma': [format_chroma_color(c) for c in colors_chroma]
+            },
+            'taxonomy': {},  # Will be filled in step 2
+            'clusters': {}   # Will be filled in step 3
+        }
+
+    # Step 2: Add taxonomy from Flora Batava illustration file names
+    illustration_csv = Path("streamlit_app/data/Flora Batava - illustration file names final.csv")
     if illustration_csv.exists():
-        print("Building flora_metadata.csv from illustration file names...")
-        import csv as csv_mod
-        from collections import defaultdict
-
+        print("  Merging taxonomy from Flora Batava illustration spreadsheet...")
         with open(illustration_csv, encoding='utf-8-sig') as f:
             reader = csv_mod.DictReader(f, delimiter=';')
             ill_rows = [r for r in reader if r['File name'].strip()]
@@ -297,12 +348,13 @@ def main():
             fid = r['File name'].replace('.tif.jpg', '')
             file_to_rows[fid].append(r)
 
-        flora_records = []
         for fid, file_rows in file_to_rows.items():
+            if fid not in plants:
+                continue  # Skip plants without mask data
+
             if len(file_rows) == 1:
                 r = file_rows[0]
-                flora_records.append({
-                    'plant_id': fid,
+                plants[fid]['taxonomy'] = {
                     'volume': r['Volume'],
                     'species_raw': r['Species name RAW'],
                     'species_current': r['Species name CURRENT'],
@@ -314,15 +366,14 @@ def main():
                     'kb_link': r['Link.KB'].strip() or None,
                     'multi_species': False,
                     'all_species': r['Species name CURRENT'],
-                })
+                }
             else:
                 species_list = [r['Species name CURRENT'] for r in file_rows]
                 dutch_names = [r['Dutch common name'].strip() for r in file_rows if r['Dutch common name'].strip()]
                 families = list(dict.fromkeys(r['Family'] for r in file_rows))
                 genera = list(dict.fromkeys(r['Genus'] for r in file_rows))
                 r0 = file_rows[0]
-                flora_records.append({
-                    'plant_id': fid,
+                plants[fid]['taxonomy'] = {
                     'volume': r0['Volume'],
                     'species_raw': ' / '.join(r['Species name RAW'] for r in file_rows),
                     'species_current': ' / '.join(species_list),
@@ -334,14 +385,118 @@ def main():
                     'kb_link': r0['Link.KB'].strip() or None,
                     'multi_species': True,
                     'all_species': ' / '.join(species_list),
-                })
+                }
 
-        flora_df = pd.DataFrame(flora_records)
-        flora_csv_path = OUTPUT_DIR / "flora_metadata.csv"
-        flora_df.to_csv(flora_csv_path, index=False)
-        print(f"  ✓ Saved {len(flora_df)} entries to {flora_csv_path}")
-    else:
-        print(f"  ⚠ Warning: {illustration_csv} not found, skipping flora_metadata.csv generation")
+    # Step 3: Add cluster assignments
+    models = ['dinov2']
+    for model in models:
+        json_path = CLUSTER_DATA_DIR / f"cluster_data_{model}.json"
+        if not json_path.exists():
+            continue
+
+        with open(json_path) as f:
+            cluster_data = json.load(f)
+
+        for cluster_id_str, cluster_plants in cluster_data.items():
+            for plant in cluster_plants:
+                plant_id = plant['plant_id']
+                for ext in ['.tif.jpg', '.jpg', '.tif']:
+                    if plant_id.endswith(ext):
+                        plant_id = plant_id[:-len(ext)]
+                        break
+
+                if plant_id in plants:
+                    plants[plant_id]['clusters'][model] = int(cluster_id_str) if cluster_id_str != '-1' else -1
+
+    # Step 4: Compute comparison metrics
+    print("  Computing comparison metrics...")
+    # Build temporary dataframe for metrics computation
+    records = []
+    for plant_id, plant in plants.items():
+        if not plant['taxonomy'] or 'family' not in plant['taxonomy']:
+            continue
+        record = {
+            'plant_id': plant_id,
+            'family': plant['taxonomy'].get('family')
+        }
+        for model in models:
+            record[model] = plant['clusters'].get(model, -1)
+        records.append(record)
+
+    df = pd.DataFrame(records)
+    metrics = {}
+
+    for model in models:
+        if model not in df.columns:
+            continue
+
+        valid = df[(df[model] >= 0) & df['family'].notna()].copy()
+        if len(valid) == 0:
+            continue
+
+        model_metrics = {
+            'adjusted_rand_index': float(adjusted_rand_score(valid['family'], valid[model])),
+            'normalized_mutual_info': float(normalized_mutual_info_score(valid['family'], valid[model])),
+            'contingency_matrix': pd.crosstab(valid['family'], valid[model]).to_dict(),
+            'cluster_purity': {
+                int(k): float(v) for k, v in
+                valid.groupby(model)['family'].apply(
+                    lambda x: (x.value_counts().iloc[0] / len(x)) if len(x) > 0 else 0
+                ).to_dict().items()
+            },
+            'family_concentration': {
+                str(k): float(v) for k, v in
+                valid.groupby('family')[model].apply(
+                    lambda x: (x.value_counts().iloc[0] / len(x)) if len(x) > 0 else 0
+                ).to_dict().items()
+            }
+        }
+
+        # Surprising plants
+        surprising = []
+        for cluster_id in valid[model].unique():
+            cluster_plants = valid[valid[model] == cluster_id]
+            if len(cluster_plants) < 2:
+                continue
+            dominant_family = cluster_plants['family'].mode()[0]
+            outliers = cluster_plants[cluster_plants['family'] != dominant_family]
+            for _, plant in outliers.head(20).iterrows():
+                surprising.append({
+                    'plant_id': plant['plant_id'],
+                    'family': plant['family'],
+                    'cluster': int(cluster_id),
+                    'dominant_family': dominant_family,
+                    'cluster_size': len(cluster_plants)
+                })
+        model_metrics['surprising_plants'] = surprising[:100]
+        metrics[model] = model_metrics
+
+    # Step 5: Create final consolidated structure
+    consolidated = {
+        'plants': plants,
+        'comparison_metrics': metrics
+    }
+
+    # Save consolidated JSON
+    output_path = OUTPUT_DIR / "flora_data.json"
+    with open(output_path, 'w') as f:
+        json.dump(consolidated, f, indent=2)
+
+    print(f"  ✓ Saved consolidated data to {output_path}")
+    print(f"  ✓ {len(plants)} plants with taxonomy, colors, and clusters")
+    return consolidated
+
+def main():
+    """Run all data preparation steps."""
+    print("=" * 60)
+    print("Preparing data for Streamlit app")
+    print("=" * 60)
+
+    # Load masks metadata
+    masks_meta = load_masks_metadata()
+
+    # Create consolidated JSON with all data (plants, taxonomy, clusters, metrics)
+    consolidated = create_consolidated_json(masks_meta)
 
     print("=" * 60)
     print("Data preparation complete!")

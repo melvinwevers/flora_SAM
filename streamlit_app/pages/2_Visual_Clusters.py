@@ -64,23 +64,17 @@ col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
     color_ranking = st.radio(
         "Color Ranking",
-        options=["frequency", "chroma", "botanical", "perceptual", "saliency"],
+        options=["frequency", "chroma"],
         format_func=lambda x: {
             "frequency": "Frequency",
-            "chroma": "Dominant Pigments",
-            "botanical": "Botanical Contrast",
-            "perceptual": "Perceptual",
-            "saliency": "Salience",
+            "chroma": "Vividness",
         }[x],
         horizontal=True,
         help=(
-            "**Frequency** — most area coverage.\n\n"
-            "**Dominant Pigments** — K-means on chromatic pixels only (LAB chroma > 15), "
-            "removing neutral paper/beige first so small coloured features like flowers "
-            "always appear. Sorted by vividness.\n\n"
-            "**Botanical Contrast** — colors that pop against green/brown backgrounds.\n\n"
-            "**Perceptual** — balances area, saturation, and image contrast.\n\n"
-            "**Salience** — colors in visually prominent regions."
+            "**Frequency** — colors sorted by area coverage.\n\n"
+            "**Vividness** — colors sorted by LAB chroma (√(a² + b²)), "
+            "a perceptually uniform measure of color intensity. Reveals what "
+            "the 18th-century illustrator emphasized with vivid watercolor pigments."
         )
     )
 

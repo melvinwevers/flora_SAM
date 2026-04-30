@@ -100,61 +100,44 @@ Use the sidebar to navigate between different views, or use the search above to 
 
 with st.expander("How are colors ranked?"):
     st.markdown("""
-    The app provides **five different color rankings** for each plant:
+    The app provides **two color rankings** for each plant:
 
     ### 1. Frequency
     Colors sorted by **area coverage** — the most common color first.
-    - **Best for**: Understanding the overall color composition of a plant.
 
-    ### 2. Botanical Contrast
-    Colors ranked by how much they **stand out against a typical botanical background**
-    (greens, browns, beiges, grays). Uses perceptual distance (Delta E in LAB color space)
-    from a reference palette of 14 common botanical illustration tones.
-    - **Formula**: `0.8 × contrast_from_background + 0.2 × frequency`
-    - **Best for**: Surfacing flowers, berries, and unusual pigments that would otherwise
-      be buried behind dominant greens and browns.
+    **What it measures:** Percentage of the illustration occupied by each color.
 
-    ### 3. Perceptual
-    Colors ranked by **intrinsic visual distinctiveness** — a heuristic combining:
-    - Frequency (40%): How much area the color covers
-    - Saturation (30%): How vivid the color is (HSL color space)
-    - Contrast (30%): Average Delta E distance to the *other colors in the same image*
-    - **Best for**: Colors that are striking due to their inherent properties,
-      independent of where they appear in the image.
+    **Best for:** Understanding the overall color composition and what the illustrator
+    painted most prominently.
 
-    ### 4. Salience
-    Colors ranked by **spatial attention** — where the eye is drawn in the image.
-    - **Method**: OpenCV Spectral Residual saliency map (or Sobel edge fallback)
-    - **Process**: Compute a saliency map (0–1) for the image, then average saliency
-      values at the pixels belonging to each color cluster.
-    - **Best for**: Identifying what the illustrator emphasized — typically flowers,
-      fruits, or other diagnostic structures.
+    ### 2. Vividness (Chroma)
+    Colors sorted by **chromatic intensity** — the most vivid colors first.
 
-    ### 5. Dominant Pigments
-    Colors extracted by **chroma-filtered K-means** — only chromatic (non-neutral) pixels
-    are clustered. Pixels with LAB chroma ≤ 15 (paper, beige, gray, dark brown) are
-    excluded before clustering, so even tiny areas of vivid color form their own cluster.
-    - **Process**: Filter pixels to LAB chroma > 15, run K-means on the remainder, sort
-      clusters by **botanical contrast** (same formula as ranking 2) so that unusual
-      pigments like purple flowers rank above common leaf-yellows that happen to have
-      high raw chroma.
-    - **Best for**: Reliably surfacing small but vividly colored features — a single red
-      flower or a cluster of blue berries — that would be invisible in Frequency ranking
-      because they represent less than 1% of all pixels.
+    **What it measures:** LAB chroma = √(a² + b²), a perceptually uniform measure of
+    color vividness. Higher chroma = more saturated, vibrant color.
+
+    **Why this works for botanical illustrations:** Historical botanical illustrators
+    intentionally used vivid watercolor pigments to emphasize diagnostic features like
+    flowers, fruits, and berries. By ranking colors by vividness, we reveal what the
+    18th-century artist chose to highlight.
+
+    **Best for:** Finding flowers, fruits, and other colorful features that may occupy
+    small areas (< 1% of pixels) but were painted with vivid pigments.
+
+    **Research basis:** Chroma ranking is based on vision research showing that color
+    saturation is a key factor in visual attention ([Pal et al. 2012](https://dl.acm.org/doi/10.1145/2425333.2425357)),
+    and historical practice where botanical illustrators intentionally used vivid watercolors
+    to emphasize diagnostic features ([Bauer's pigment studies](https://www.researchgate.net/publication/230083140)).
 
     ### Which ranking to use?
 
-    | Ranking | Question it answers |
-    |---|---|
-    | Frequency | "What colors dominate this plant?" |
-    | Botanical Contrast | "What colors pop out of the green/brown background?" |
-    | Perceptual | "What colors are intrinsically striking?" |
-    | Salience | "What would I notice first when looking at this?" |
-    | Dominant Pigments | "What vivid colors are present, even if rare?" |
+    | Ranking | Question it answers | Example |
+    |---|---|---|
+    | **Frequency** | "What colors dominate?" | Green leaves (70%), brown stems (15%), yellow flower (0.5%) |
+    | **Vividness** | "What did the artist paint most vividly?" | Yellow flower (chroma 50), green leaves (chroma 18), brown stems (chroma 12) |
 
-    For finding characteristic flower or fruit colors, **Dominant Pigments** or
-    **Botanical Contrast** are usually the most useful. For understanding the full
-    illustration composition, use **Frequency**.
+    **Tip:** For finding characteristic flower or fruit colors, use **Vividness**.
+    For understanding the overall illustration composition, use **Frequency**.
     """)
 
 # Load cluster data
