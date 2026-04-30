@@ -341,43 +341,40 @@ def extract_dominant_colors(
 
     total_pixels_full = len(pixels)
 
-    # --- Chroma pass: K-means on only chromatic (non-neutral) pixels ---
-    # Filters to LAB chroma = √(a²+b²) > 8, removing paper, beige, and
-    # neutral grays. Lowered from 15 to 8 to capture pastel blues/pinks
-    # in historical watercolor illustrations. This makes rare coloured
-    # features (e.g. 0.3% terracotta flowers, pale blue petals) a
-    # significant fraction of the remaining pixels so K-means reliably
-    # allocates them their own cluster.
-    pixels_lab_all = rgb2lab(
-        (pixels.astype(np.float32) / 255.0).reshape(-1, 1, 3)
-    ).reshape(-1, 3)
-    chroma_all = np.sqrt(pixels_lab_all[:, 1] ** 2 + pixels_lab_all[:, 2] ** 2)
-    chromatic_mask = chroma_all > 8.0  # Lowered from 15 to capture pastels
-    chromatic_pixels = pixels[chromatic_mask]
+    # Save copy for chroma analysis before sampling
+    pixels_full = pixels.copy()
 
-    if len(chromatic_pixels) >= n_colors:
-        chroma_sample_size = min(len(chromatic_pixels), sample_size)
-        chroma_idx = np.random.choice(
-            len(chromatic_pixels), chroma_sample_size, replace=False
-        )
-        chroma_sample = chromatic_pixels[chroma_idx].reshape(-1, 3)
-        n_chroma_clusters = min(n_colors * 2, len(chromatic_pixels))
-        chroma_kmeans = MiniBatchKMeans(
-            n_clusters=n_chroma_clusters, random_state=42, n_init=3, max_iter=100
-        )
-        chroma_kmeans.fit(chroma_sample)
-        chroma_centers = chroma_kmeans.cluster_centers_.astype(int)
-        # Count across ALL chromatic pixels for real image percentages
-        chroma_diffs = (
-            chromatic_pixels[:, np.newaxis, :].astype(float)
-            - chroma_centers[np.newaxis, :, :]
-        )
-        chroma_assign = np.sqrt((chroma_diffs ** 2).sum(axis=2)).argmin(axis=1)
-        chroma_counts = np.zeros(len(chroma_centers), dtype=int)
-        for lbl, cnt in zip(*np.unique(chroma_assign, return_counts=True)):
-            chroma_counts[lbl] = cnt
-    else:
-        chroma_centers = None
+    # --- Chroma pass: COMPREHENSIVE extraction with many clusters ---
+    # Run k-means with MANY clusters (100) to ensure rare colors get separated,
+    # then keep only those with high chroma. This captures rare colored features
+    # (0.1-0.5% of pixels) that would otherwise be averaged into larger clusters.
+
+    # Calculate chroma for all pixels
+    pixels_lab_full = rgb2lab(
+        (pixels_full.astype(np.float32) / 255.0).reshape(-1, 1, 3)
+    ).reshape(-1, 3)
+    chroma_full = np.sqrt(pixels_lab_full[:, 1] ** 2 + pixels_lab_full[:, 2] ** 2)
+
+    # Run k-means with many clusters (100) to get diverse colors
+    chroma_sample_size = min(len(pixels_full), sample_size * 2)  # Larger sample
+    chroma_idx = np.random.choice(len(pixels_full), chroma_sample_size, replace=False)
+    chroma_sample = pixels_full[chroma_idx].reshape(-1, 3)
+    n_chroma_clusters = min(100, len(pixels_full))  # Many clusters to separate rare colors
+    chroma_kmeans = MiniBatchKMeans(
+        n_clusters=n_chroma_clusters, random_state=42, n_init=5, max_iter=150
+    )
+    chroma_kmeans.fit(chroma_sample)
+    chroma_centers = chroma_kmeans.cluster_centers_.astype(int)
+
+    # Count across ALL pixels for real image percentages
+    chroma_diffs = (
+        pixels_full[:, np.newaxis, :].astype(float)
+        - chroma_centers[np.newaxis, :, :]
+    )
+    chroma_assign = np.sqrt((chroma_diffs ** 2).sum(axis=2)).argmin(axis=1)
+    chroma_counts = np.zeros(len(chroma_centers), dtype=int)
+    for lbl, cnt in zip(*np.unique(chroma_assign, return_counts=True)):
+        chroma_counts[lbl] = cnt
 
     # --- Regular uniform sample for frequency / saliency ---
     if len(pixels) > sample_size:
@@ -465,13 +462,11 @@ def extract_dominant_colors(
         for color in (frequency_sorted + saliency_sorted):
             color.pop('rgb_tuple', None)
 
-        # Chroma ranking: K-means on LAB-chroma > 15 pixels only.
-        # Neutral paper/beige/gray is removed before clustering so rare
-        # coloured features (small flowers, berries) are never swamped by
-        # the dominant background and always form their own cluster.
-        # Sorted by raw chroma (vividness) = √(a² + b²) to prioritize
-        # the most vivid colors, which reveals what the 18th-century
-        # illustrator emphasized with saturated watercolor pigments.
+        # Chroma ranking: Surfaces distinctive botanical features (flowers, fruits,
+        # berries) by filtering out dominant green/yellow foliage. Uses "botanical
+        # contrast" score combining chroma, hue distinctiveness, and rarity to
+        # prioritize visually interesting colors that 18th-century illustrators
+        # emphasized (pink flowers, blue berries, red fruits) over abundant leaves.
         if chroma_centers is not None:
             chroma_color_data = []
             for i, rgb in enumerate(chroma_centers):
@@ -498,9 +493,58 @@ def extract_dominant_colors(
                     'chroma': round(center_chroma, 2),
                 })
 
+            # Filter for DISTINCTIVE colors (flowers, fruits, berries - not leaves)
+            # Goal: surface rare, visually interesting colors that aren't green/yellow foliage
+
+            # Calculate LAB hue angle for each color
+            for color in chroma_color_data:
+                a, b = color['lab'][1], color['lab'][2]
+                # Hue angle in degrees: -180 to 180
+                # -45 to 135 = yellow-green range (typical foliage)
+                hue_angle = np.arctan2(b, a) * 180 / np.pi
+                color['hue_angle'] = hue_angle
+
+                # Calculate "botanical contrast" score:
+                # High score = colors that stand out from typical green/yellow foliage
+                # Typical foliage: negative 'a' (green), positive 'b' (yellow)
+                # Distinctive colors: positive 'a' (red/pink), negative 'b' (blue), or both
+
+                # Score components:
+                # 1. Chroma (vividness) - higher is better
+                # 2. Distance from green-yellow quadrant (distinctive hue)
+                # 3. Rarity (inverse of percentage)
+
+                # Foliage penalty: reduce score for yellow-green hues
+                is_foliage = (a < 0 and b > 0 and hue_angle > -45 and hue_angle < 135)
+                foliage_penalty = 0.3 if is_foliage else 1.0
+
+                # Rarity boost: rare colors are more interesting
+                rarity_boost = max(1.0, 5.0 / max(color['percentage'], 0.1))
+                rarity_boost = min(rarity_boost, 3.0)  # Cap at 3x
+
+                # Distinctive hue boost: reward red/pink (a>0) and blue (b<0)
+                hue_boost = 1.0
+                if a > 5:  # Pink/red
+                    hue_boost = 1.5
+                if b < -5:  # Blue
+                    hue_boost = 1.5
+                if a > 5 and b < -5:  # Purple
+                    hue_boost = 2.0
+
+                # Combined "botanical contrast" score
+                color['botanical_contrast'] = (
+                    color['chroma'] * foliage_penalty * rarity_boost * hue_boost
+                )
+
+            # Sort by botanical contrast score
             chroma_sorted = sorted(
-                chroma_color_data, key=lambda x: x['chroma'], reverse=True
-            )[:n_colors]
+                chroma_color_data, key=lambda x: x['botanical_contrast'], reverse=True
+            )[:n_colors]  # Return top n_colors (10) distinctive colors
+
+            # Clean up temporary fields
+            for color in chroma_sorted:
+                color.pop('hue_angle', None)
+                color.pop('botanical_contrast', None)
         else:
             chroma_sorted = frequency_sorted[:n_colors]
 
