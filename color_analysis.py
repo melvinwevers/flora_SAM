@@ -397,12 +397,12 @@ def extract_dominant_colors(
     ).reshape(-1, 3)
     chroma_full = np.sqrt(pixels_lab_full[:, 1] ** 2 + pixels_lab_full[:, 2] ** 2)
 
-    # Run k-means with extra clusters (15) to get diverse colors
-    # Optimized for speed while capturing most distinctive colors
+    # Run k-means with extra clusters (30) to get diverse colors
+    # Balance between speed and capturing rare colors (0.5% of pixels)
     chroma_sample_size = min(len(pixels_full), sample_size)  # Standard sample size
     chroma_idx = np.random.choice(len(pixels_full), chroma_sample_size, replace=False)
     chroma_sample = pixels_full[chroma_idx].reshape(-1, 3)
-    n_chroma_clusters = min(15, len(pixels_full))  # 15 clusters for speed
+    n_chroma_clusters = min(30, len(pixels_full))  # 30 clusters to capture rare features
     chroma_kmeans = MiniBatchKMeans(
         n_clusters=n_chroma_clusters, random_state=42, n_init=2, max_iter=50
     )
@@ -531,61 +531,61 @@ def extract_dominant_colors(
                 })
 
             # Filter for DISTINCTIVE colors (flowers, fruits, berries - not leaves)
-            # Goal: surface rare, visually interesting colors that aren't green/yellow foliage
+            # Goal: surface colors that stand out from typical green foliage
+            # Strategy: Measure distance from green foliage palette in LAB space
+            # This naturally captures vivid yellows, pinks, blues, purples, etc.
 
-            # Calculate LAB hue angle for each color
+            # Define typical botanical foliage palette (greens, olive greens, gray-greens)
+            foliage_palette = [
+                (45, -20, 25),   # dark leaf green
+                (55, -25, 30),   # mid leaf green
+                (65, -15, 35),   # light leaf green
+                (50, -5, 15),    # grayish green
+                (60, -10, 20),   # olive green
+            ]
+
+            def color_distance_ab(lab1, lab2):
+                """Euclidean distance in a,b plane (ignoring lightness L)
+
+                This focuses on hue/chroma differences rather than lightness,
+                preventing light beige colors from ranking high just because
+                they're lighter than the green palette.
+                """
+                return ((lab1[1] - lab2[1])**2 +
+                        (lab1[2] - lab2[2])**2) ** 0.5
+
+            # Calculate botanical contrast for each color
+            # Contrast = minimum distance to any foliage color
             for color in chroma_color_data:
-                a, b = color['lab'][1], color['lab'][2]
-                # Hue angle in degrees: -180 to 180
-                # -45 to 135 = yellow-green range (typical foliage)
-                hue_angle = np.arctan2(b, a) * 180 / np.pi
-                color['hue_angle'] = hue_angle
+                lab = color['lab']
 
-                # Calculate "botanical contrast" score:
-                # High score = colors that stand out from typical green/yellow foliage
-                # Typical foliage: negative 'a' (green), positive 'b' (yellow)
-                # Distinctive colors: positive 'a' (red/pink), negative 'b' (blue), or both
-
-                # Score components:
-                # 1. Chroma (vividness) - higher is better
-                # 2. Distance from green-yellow quadrant (distinctive hue)
-                # 3. Rarity (inverse of percentage)
-
-                # Foliage penalty: reduce score for yellow-green hues
-                is_foliage = (a < 0 and b > 0 and hue_angle > -45 and hue_angle < 135)
-                foliage_penalty = 0.3 if is_foliage else 1.0
-
-                # Rarity boost: rare colors are more interesting
-                rarity_boost = max(1.0, 5.0 / max(color['percentage'], 0.1))
-                rarity_boost = min(rarity_boost, 3.0)  # Cap at 3x
-
-                # Distinctive hue boost: reward red/pink (a>0) and blue (b<0)
-                hue_boost = 1.0
-                if a > 5:  # Pink/red
-                    hue_boost = 1.5
-                if b < -5:  # Blue
-                    hue_boost = 1.5
-                if a > 5 and b < -5:  # Purple
-                    hue_boost = 2.0
-
-                # Calculate NEW botanical contrast score (hue-based)
-                # Improved to not penalize pure yellows
-                # Foliage check: only penalize GREEN-yellows (a < -5), not pure yellows (a ≈ 0)
-                is_foliage_improved = (a < -5 and b > 0 and hue_angle > -45 and hue_angle < 135)
-                foliage_penalty_improved = 0.3 if is_foliage_improved else 1.0
-
-                color['botanical_contrast'] = (
-                    color['chroma'] * foliage_penalty_improved * rarity_boost * hue_boost
+                # Find minimum distance to foliage palette (using a,b only)
+                min_distance = min(
+                    color_distance_ab(lab, foliage_ref)
+                    for foliage_ref in foliage_palette
                 )
 
-            # Sort by NEW botanical contrast (hue-based with improved yellow handling)
+                # Store raw distance as botanical contrast score
+                # Higher distance = more distinctive from foliage
+                color['botanical_contrast'] = min_distance
+
+            # Filter out colors too similar to green foliage (a,b distance < 15)
+            # This removes most greens while keeping distinctive colors
+            # Threshold of 15 captures yellows (~18-20), pinks (~19), blues (~25)
+            distinctive_colors = [
+                c for c in chroma_color_data
+                if c['botanical_contrast'] > 15
+            ]
+
+            # Sort by botanical contrast (distance from green)
             chroma_sorted = sorted(
-                chroma_color_data, key=lambda x: x['botanical_contrast'], reverse=True
-            )[:n_colors]  # Return top n_colors (10) distinctive colors
+                distinctive_colors,
+                key=lambda x: x['botanical_contrast'],
+                reverse=True
+            )[:n_colors]  # Return top n_colors (10) most distinctive colors
 
             # Clean up temporary fields
             for color in chroma_sorted:
-                color.pop('hue_angle', None)
                 color.pop('botanical_contrast', None)
         else:
             chroma_sorted = frequency_sorted[:n_colors]
